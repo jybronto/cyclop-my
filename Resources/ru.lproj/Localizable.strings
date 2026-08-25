@@ -140,3 +140,19 @@
 "Keyboard and trackpad are locked" = "Клавиатура и трекпад заблокированы";
 "Hold Esc or − for %d s" = "Держи Esc или − %d с";
 "Unlocks by itself in %d s" = "Само снимется через %d с";
+
+/* Вкладка аутентификаторов: коды TOTP. «Секрет» — то самое, что сайт печатает
+   под QR-квадратом; слово взято такое же, каким его называют сами сайты. */
+"Codes" = "Коды";
+"Authenticator" = "Аутентификатор";
+"Copy the code" = "Скопировать код";
+"Add an authenticator" = "Добавить аутентификатор";
+"Secret or otpauth:// link" = "Секрет или ссылка otpauth://";
+"Take the link or the QR screenshot from the clipboard" = "Взять ссылку или снимок QR из буфера обмена";
+"Copy this one with the button above" = "Копировать кнопкой сверху именно этот";
+"Paste an otpauth:// link, or copy the QR and press +" = "Вставьте ссылку otpauth:// или скопируйте QR и нажмите +";
+"Not a secret or an otpauth:// link" = "Это не секрет и не ссылка otpauth://";
+"Nothing on the clipboard that looks like an authenticator" = "В буфере обмена нет ничего похожего на аутентификатор";
+"The keychain item cannot be read — nothing was written" = "Запись в связке ключей не читается — ничего не записано";
+"The keychain did not open — click to ask again; nothing is overwritten" = "Связка ключей не открылась — нажмите, чтобы спросить снова; ничего не перезаписано";
+"Press again — a deleted secret cannot be brought back" = "Нажмите ещё раз — удалённый секрет не вернуть";

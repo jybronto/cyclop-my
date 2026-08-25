@@ -130,6 +130,8 @@ struct NotchContentView: View {
             CurrencyRateDate(currencies: vm.currencies)
         case .notes:
             NotesCounter(notes: vm.notes)
+        case .totp:
+            TOTPCounter(totp: vm.totp)
         case .teleprompter:
             EmptyView()
         case .utilities:
@@ -201,12 +203,34 @@ struct NotchContentView: View {
             CurrencyPane(currencies: vm.currencies, wantsKeyboard: $panel.wantsKeyboard)
         case .notes:
             NotesPane(notes: vm.notes, privacy: vm.privacy, wantsKeyboard: $panel.wantsKeyboard)
+        case .totp:
+            TOTPPane(totp: vm.totp, privacy: vm.privacy, wantsKeyboard: $panel.wantsKeyboard)
         case .teleprompter:
             TeleprompterPane(prompter: vm.teleprompter, wantsKeyboard: $panel.wantsKeyboard)
         case .utilities:
             UtilitiesPane(lock: vm.keyboardLock)
         case .settings:
             SettingsPane(vm: vm, shelf: vm.shelf, screenshots: vm.screenshotFolder)
+        }
+    }
+}
+
+/// Same reasoning as the notes counter below: the store is changed from inside
+/// the pane, and the view model deliberately does not forward the stores whose
+/// panes carry a text field.
+///
+/// Counts accounts rather than showing the primary's countdown. A countdown
+/// would have to tick, and this strip is redrawn from the view model — a timer
+/// wired to it would repaint the whole panel once a second for a number that is
+/// already on screen, in a ring, two rows below.
+private struct TOTPCounter: View {
+    @ObservedObject var totp: TOTPStore
+
+    var body: some View {
+        if !totp.accounts.isEmpty {
+            Text("\(totp.accounts.count)")
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.tertiary)
         }
     }
 }
