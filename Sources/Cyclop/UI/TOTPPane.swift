@@ -27,6 +27,10 @@ struct TOTPPane: View {
     /// where the secret came from instead of appearing to invent it.
     @State private var tookFromPasteboard = false
     @State private var justCopied = false
+    /// How many accounts the last import brought in, while that is still worth
+    /// saying. Only ever shown above one: a single addition announces itself by
+    /// appearing in the list, a dozen appearing at once does not.
+    @State private var importedCount = 0
 
     var body: some View {
         VStack(spacing: 6) {
@@ -43,6 +47,7 @@ struct TOTPPane: View {
             }
             if totp.vaultUnreadable { unreadableNotice }
             if let problem { problemNotice(problem) }
+            if importedCount > 1 { importedNotice(importedCount) }
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 list(now: timeline.date)
             }
@@ -220,6 +225,19 @@ struct TOTPPane: View {
         .onTapGesture { totp.retry() }
     }
 
+    private func importedNotice(_ count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.green.opacity(0.85))
+            Text(localized("Added: %d", count))
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func problemNotice(_ text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
@@ -324,10 +342,17 @@ struct TOTPPane: View {
             problem = failure
             return
         }
+        // Read before the editor closes, because closing it clears the drafts
+        // and this number is the only trace a bulk import leaves.
+        let count = totp.imported
         // Out of the editor rather than straight into another one: adding an
         // authenticator is a thing done once per site, unlike a snippet, and
         // what is wanted next is the code.
         cancelAdding()
+        if count > 1 {
+            importedCount = count
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { importedCount = 0 }
+        }
     }
 }
 

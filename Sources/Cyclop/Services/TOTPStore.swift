@@ -27,6 +27,10 @@ final class TOTPStore: ObservableObject {
     /// writing is forbidden: overwriting an item that could not be read is how
     /// a list of authenticators becomes an empty list of authenticators.
     @Published private(set) var vaultUnreadable = false
+    /// How many accounts the last addition brought in. One, normally — but a
+    /// Google Authenticator export arrives as a dozen at once, and a tab that
+    /// silently grew by eleven rows owes the user a number.
+    @Published private(set) var imported = 0
 
     private var loaded = false
 
@@ -57,17 +61,22 @@ final class TOTPStore: ObservableObject {
     /// real and are simply never accepted.
     @discardableResult
     func add(text: String, name: String) -> String? {
-        guard let account = TOTP.account(from: text, name: name) else {
+        let found = TOTP.accounts(from: text, name: name)
+        guard !found.isEmpty else {
             return localized("Not a secret or an otpauth:// link")
         }
         loadIfNeeded()
         guard !vaultUnreadable else { return localized("The keychain item cannot be read — nothing was written") }
-        // Same secret twice is a re-add, not a second account: sites hand the
-        // URI out again on every "reset two-factor", and two rows that mint the
-        // same code are two rows to choose between for no reason.
-        accounts.removeAll { $0.secret == account.secret }
-        accounts.append(account)
-        if primaryID == nil { primaryID = account.id }
+        for account in found {
+            // Same secret twice is a re-add, not a second account: sites hand
+            // the URI out again on every "reset two-factor", an export can be
+            // scanned twice, and two rows that mint the same code are two rows
+            // to choose between for no reason.
+            accounts.removeAll { $0.secret == account.secret }
+            accounts.append(account)
+        }
+        if primaryID == nil { primaryID = accounts.first?.id }
+        imported = found.count
         save()
         return nil
     }
@@ -142,7 +151,10 @@ final class TOTPStore: ObservableObject {
         // The first one that is an authenticator wins; the rest are not ours.
         for observation in request.results ?? [] {
             guard let payload = observation.payloadStringValue else { continue }
-            if payload.lowercased().hasPrefix("otpauth://") { return payload }
+            let lowered = payload.lowercased()
+            // Both schemes: one QR from a site, or the one Google Authenticator
+            // shows when handing over everything it holds.
+            if lowered.hasPrefix("otpauth://") || lowered.hasPrefix("otpauth-migration://") { return payload }
         }
         return nil
     }

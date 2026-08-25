@@ -156,3 +156,4 @@
 "The keychain item cannot be read — nothing was written" = "Запись в связке ключей не читается — ничего не записано";
 "The keychain did not open — click to ask again; nothing is overwritten" = "Связка ключей не открылась — нажмите, чтобы спросить снова; ничего не перезаписано";
 "Press again — a deleted secret cannot be brought back" = "Нажмите ещё раз — удалённый секрет не вернуть";
+"Added: %d" = "Добавлено: %d";

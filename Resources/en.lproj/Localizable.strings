@@ -156,3 +156,4 @@
 "The keychain item cannot be read — nothing was written" = "The keychain item cannot be read — nothing was written";
 "The keychain did not open — click to ask again; nothing is overwritten" = "The keychain did not open — click to ask again; nothing is overwritten";
 "Press again — a deleted secret cannot be brought back" = "Press again — a deleted secret cannot be brought back";
+"Added: %d" = "Added: %d";

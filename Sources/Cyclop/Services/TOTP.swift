@@ -114,21 +114,41 @@ enum TOTP {
 
     // MARK: - Reading a secret
 
-    /// Turns whatever was pasted into an account, or gives up.
+    /// Turns whatever was pasted into accounts, or gives up.
     ///
-    /// Two shapes arrive in practice and both are accepted, because which one a
-    /// site hands over is not the user's choice: the full `otpauth://` URI that
-    /// sits behind the QR code, and the bare base32 secret printed under it for
-    /// people typing it in by hand. The URI carries the name and the parameters;
-    /// the bare secret carries nothing, so `name` stands in for the label there.
-    static func account(from text: String, name: String = "") -> TOTPAccount? {
+    /// Three shapes arrive in practice and all are accepted, because which one
+    /// a site or an app hands over is not the user's choice: the full
+    /// `otpauth://` URI that sits behind a QR code, the bare base32 secret
+    /// printed under it for people typing it in by hand, and the
+    /// `otpauth-migration://` payload Google Authenticator writes when it is
+    /// asked to hand its accounts over. The first two are one account, the
+    /// third is however many were on the phone.
+    ///
+    /// Only the bare secret carries no name, so `name` stands in for the label
+    /// there and is ignored by the other two, which bring their own.
+    static func accounts(from text: String, name: String = "") -> [TOTPAccount] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.lowercased().hasPrefix("otpauth://") {
-            return fromURI(trimmed, fallbackName: name)
+        guard !trimmed.isEmpty else { return [] }
+        let lowered = trimmed.lowercased()
+        // Checked before the plain `otpauth://` case and not with `hasPrefix`
+        // on a shared stem: the two schemes only look alike. One is text
+        // carrying a single account, the other a binary payload carrying every
+        // account at once.
+        if lowered.hasPrefix("otpauth-migration://") {
+            return fromMigration(trimmed)
         }
-        guard let secret = base32(trimmed) else { return nil }
-        return TOTPAccount(issuer: name.trimmingCharacters(in: .whitespaces), account: "", secret: secret)
+        if lowered.hasPrefix("otpauth://") {
+            guard let one = fromURI(trimmed, fallbackName: name) else { return [] }
+            return [one]
+        }
+        guard let secret = base32(trimmed) else { return [] }
+        return [TOTPAccount(issuer: name.trimmingCharacters(in: .whitespaces), account: "", secret: secret)]
+    }
+
+    /// For the callers that only need to know whether the text parses at all,
+    /// and what the first account in it is called.
+    static func account(from text: String, name: String = "") -> TOTPAccount? {
+        accounts(from: text, name: name).first
     }
 
     /// `otpauth://totp/Issuer:account?secret=…&issuer=…&digits=…&period=…&algorithm=…`
@@ -208,4 +228,202 @@ enum TOTP {
         }
         return table
     }()
+}
+
+// MARK: - Google Authenticator export
+
+/// The export format Google Authenticator writes into its "transfer accounts"
+/// QR codes: `otpauth-migration://offline?data=<base64 protobuf>`.
+///
+/// A different thing from `otpauth://` despite the name. That one is text and
+/// carries one account; this is a binary payload carrying *all* of them, which
+/// is the whole point — moving off Google Authenticator means moving a dozen
+/// accounts, and doing that one re-enrolment at a time is how people give up
+/// halfway and keep the phone.
+///
+/// Google never published a schema for it, but the wire format is protobuf and
+/// the field numbers have been stable for years:
+///
+/// ```
+/// MigrationPayload { repeated OtpParameters otp_parameters = 1; ... }
+/// OtpParameters {
+///     bytes  secret    = 1;   // raw bytes, not base32
+///     string name      = 2;   // "Issuer:account", or just the account
+///     string issuer    = 3;
+///     enum   algorithm = 4;   // 1 SHA1, 2 SHA256, 3 SHA512, 4 MD5
+///     enum   digits    = 5;   // 1 → six, 2 → eight
+///     enum   type      = 6;   // 1 HOTP, 2 TOTP
+///     int64  counter   = 7;   // HOTP only
+/// }
+/// ```
+///
+/// The period is absent because Google only ever writes 30.
+extension TOTP {
+    static func fromMigration(_ text: String) -> [TOTPAccount] {
+        guard let payload = migrationPayload(text) else { return [] }
+        return parseMigration([UInt8](payload))
+    }
+
+    /// Pulls `data=` out and un-base64s it.
+    ///
+    /// Read out of the raw query rather than through `queryItems`: the payload
+    /// is standard base64 and contains `+` and `/`, and a `+` that arrives
+    /// already decoded would be turned into a space by anything that treats the
+    /// query as a form. Percent-decoding is done here, once, deliberately.
+    private static func migrationPayload(_ text: String) -> Data? {
+        guard let components = URLComponents(string: text),
+              let raw = components.percentEncodedQueryItems?
+                .first(where: { $0.name.lowercased() == "data" })?.value,
+              let decoded = raw.removingPercentEncoding else { return nil }
+
+        // Both alphabets are accepted: the standard one is what Google writes,
+        // and the URL-safe one is what several exporters and QR readers hand
+        // back after doing their own decoding.
+        var base64 = decoded
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        return Data(base64Encoded: base64)
+    }
+
+    private static func parseMigration(_ bytes: [UInt8]) -> [TOTPAccount] {
+        var reader = ProtobufReader(bytes: bytes)
+        var found: [TOTPAccount] = []
+        while let field = reader.field() {
+            // Field 1 is one account; everything else is batch bookkeeping —
+            // version, batch size, batch index — which matters only to an app
+            // reassembling a multi-QR export, and this one takes the QRs one at
+            // a time.
+            if field.number == 1, field.wire == 2 {
+                guard let block = reader.lengthDelimited() else { break }
+                if let account = parseParameters(block) { found.append(account) }
+            } else if !reader.skip(wire: field.wire) {
+                break
+            }
+        }
+        return found
+    }
+
+    private static func parseParameters(_ bytes: [UInt8]) -> TOTPAccount? {
+        var reader = ProtobufReader(bytes: bytes)
+        var secret = Data()
+        var name = ""
+        var issuer = ""
+        var algorithm = TOTPAccount.Algorithm.sha1
+        var digits = 6
+        var isTOTP = true
+
+        while let field = reader.field() {
+            switch (field.number, field.wire) {
+            case (1, 2):
+                guard let block = reader.lengthDelimited() else { return nil }
+                secret = Data(block)
+            case (2, 2):
+                guard let block = reader.lengthDelimited() else { return nil }
+                name = String(decoding: block, as: UTF8.self)
+            case (3, 2):
+                guard let block = reader.lengthDelimited() else { return nil }
+                issuer = String(decoding: block, as: UTF8.self)
+            case (4, 0):
+                guard let value = reader.varint() else { return nil }
+                switch value {
+                case 2: algorithm = .sha256
+                case 3: algorithm = .sha512
+                // 4 is MD5, which this app cannot produce. Returning nil drops
+                // the one account rather than the whole export — the other
+                // eleven are still worth having, and a silently wrong code is
+                // worse than a missing row.
+                case 4: return nil
+                default: algorithm = .sha1
+                }
+            case (5, 0):
+                guard let value = reader.varint() else { return nil }
+                digits = value == 2 ? 8 : 6
+            case (6, 0):
+                guard let value = reader.varint() else { return nil }
+                // 1 is HOTP: its codes advance on use, not on the clock, so a
+                // tab that ticks would show a number that looks live and is not.
+                isTOTP = value != 1
+            default:
+                guard reader.skip(wire: field.wire) else { return nil }
+            }
+        }
+
+        guard !secret.isEmpty, isTOTP else { return nil }
+
+        // The label carries the issuer again when there is no separate field —
+        // same shape as in an `otpauth://` label, same split.
+        var account = name.trimmingCharacters(in: .whitespaces)
+        if issuer.isEmpty, let colon = name.firstIndex(of: ":") {
+            issuer = String(name[..<colon]).trimmingCharacters(in: .whitespaces)
+            account = String(name[name.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        } else if !issuer.isEmpty, account.hasPrefix(issuer + ":") {
+            account = String(account.dropFirst(issuer.count + 1)).trimmingCharacters(in: .whitespaces)
+        }
+
+        return TOTPAccount(
+            issuer: issuer,
+            account: account,
+            secret: secret,
+            digits: digits,
+            period: 30,
+            algorithm: algorithm
+        )
+    }
+}
+
+/// Just enough protobuf to walk the export.
+///
+/// Hand-written rather than pulled in: the app has no dependencies and is not
+/// going to grow one for four field types. Nothing here trusts the input —
+/// every read is bounds-checked and every failure returns nil, because this
+/// parser is pointed at a QR code photographed off someone else's screen.
+private struct ProtobufReader {
+    let bytes: [UInt8]
+    private var index = 0
+
+    init(bytes: [UInt8]) { self.bytes = bytes }
+
+    /// Base-128 varint, low group first, top bit as the continuation flag.
+    mutating func varint() -> UInt64? {
+        var result: UInt64 = 0
+        var shift: UInt64 = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            result |= UInt64(byte & 0x7F) << shift
+            if byte & 0x80 == 0 { return result }
+            shift += 7
+            // A varint longer than ten groups cannot be a 64-bit number; it is
+            // a corrupt payload walking off into the rest of the buffer.
+            if shift > 63 { return nil }
+        }
+        return nil
+    }
+
+    /// The tag: field number and wire type packed into one varint.
+    mutating func field() -> (number: Int, wire: Int)? {
+        guard index < bytes.count, let key = varint() else { return nil }
+        return (Int(key >> 3), Int(key & 0x07))
+    }
+
+    mutating func lengthDelimited() -> [UInt8]? {
+        guard let length = varint() else { return nil }
+        let end = index + Int(length)
+        guard length <= UInt64(bytes.count), end <= bytes.count, end >= index else { return nil }
+        defer { index = end }
+        return Array(bytes[index..<end])
+    }
+
+    /// Steps over a field this parser has no use for, which is what keeps it
+    /// working when Google adds one.
+    mutating func skip(wire: Int) -> Bool {
+        switch wire {
+        case 0: return varint() != nil
+        case 1: index += 8; return index <= bytes.count
+        case 2: return lengthDelimited() != nil
+        case 5: index += 4; return index <= bytes.count
+        default: return false
+        }
+    }
 }
