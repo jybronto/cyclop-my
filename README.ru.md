@@ -6,7 +6,22 @@
 невидимо, по наведению мыши разворачивается вниз в панель с плеером, полкой для
 файлов, историей буфера обмена и ближайшими встречами.
 
-> **Это личная доработка.** Что изменено и как собрать — в [FORK.md](FORK.md).
+## Что нового в этой версии
+
+Это личная доработка [оригинального Cyclop](https://github.com/akalikbergenov/cyclop).
+Всё остальное работает как в оригинале.
+
+**Валюта: пять валют списком вместо пары**
+
+![Вкладка «Валюта»](docs/fork/currency.png)
+
+- USD, EUR, UAH, GBP и местная валюта (отмечена стрелкой), у каждой флаг
+- Сумму можно вводить в любую строку, остальные пересчитываются сами
+- Клик по флагу открывает поиск по коду, стране и названию валюты
+
+Подробности и инструкция по сборке — в [FORK.md](FORK.md).
+
+---
 
 [![build](https://github.com/akalikbergenov/cyclop/actions/workflows/build.yml/badge.svg)](https://github.com/akalikbergenov/cyclop/actions/workflows/build.yml)
 [![Buy Me a Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-%E2%98%95-FFDD00?style=flat-square&labelColor=000000)](https://buymeacoffee.com/akalikbergenov)
