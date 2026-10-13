@@ -6,7 +6,22 @@ The MacBook notch as a working tool. A native SwiftUI/AppKit app: invisible at
 rest, and on hover it unfolds downwards into a panel with a player, a shelf for
 files, clipboard history and your next meetings.
 
-> **This is a personal fork.** What changed and how to build it: [FORK.md](FORK.md) (in Russian).
+## What's new in this fork
+
+A personal fork of [the original Cyclop](https://github.com/akalikbergenov/cyclop).
+Everything else works as in the original.
+
+**Currency: five currencies in a list instead of a pair**
+
+![The Currency tab](docs/fork/currency.png)
+
+- USD, EUR, UAH, GBP and the local currency (marked with an arrow), each with its flag
+- Type into any row and the others follow
+- A click on the flag opens a search by code, country and currency name
+
+Details and build instructions: [FORK.md](FORK.md) (in Russian).
+
+---
 
 [![build](https://github.com/akalikbergenov/cyclop/actions/workflows/build.yml/badge.svg)](https://github.com/akalikbergenov/cyclop/actions/workflows/build.yml)
 [![Buy Me a Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-%E2%98%95-FFDD00?style=flat-square&labelColor=000000)](https://buymeacoffee.com/akalikbergenov)
