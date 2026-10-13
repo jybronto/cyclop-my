@@ -25,7 +25,7 @@ git pull && ./Scripts/bundle.sh && cp -R build/Cyclop.app /Applications/ && open
 
 ### Валюта: список из пяти валют вместо пары
 
-<!-- скриншот: docs/fork/currency.png -->
+![Вкладка «Валюта»](docs/fork/currency.png)
 
 - Пять строк вместо двух полей: по умолчанию USD, EUR, UAH, GBP и местная
   валюта. Вводить сумму можно в любой строке, остальные пересчитываются.
