@@ -166,7 +166,10 @@ final class MediaController: ObservableObject {
     /// JPEG decoding on the main thread is what makes a track change stutter,
     /// so it happens off it and the finished image is handed back.
     private func decodeArtwork(_ data: Data, for key: String) {
-        DispatchQueue.global(qos: .userInitiated).async {
+        // Weak on both hops: the outer closure would otherwise hold the
+        // controller strongly for the whole decode, and the newer compiler
+        // flags the inner `[weak self]` as contradicting that.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let rep = NSBitmapImageRep(data: data), let cgImage = rep.cgImage else { return }
             let image = NSImage(
                 cgImage: cgImage,
