@@ -77,7 +77,10 @@
 
 /* Currency */
 "Search currency" = "Search currency";
-"Swap currencies" = "Swap currencies";
+"Local currency" = "Local currency";
+"By region in System Settings" = "By region in System Settings";
+"Updated %@" = "Updated %@";
+"Rates of %@" = "Rates of %@";
 "No currencies match" = "No currencies match";
 
 /* Calendar */

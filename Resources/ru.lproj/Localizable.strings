@@ -76,7 +76,10 @@
 
 /* Валюта */
 "Search currency" = "Поиск валюты";
-"Swap currencies" = "Поменять валюты";
+"Local currency" = "Местная валюта";
+"By region in System Settings" = "По региону в Системных настройках";
+"Updated %@" = "Обновлено %@";
+"Rates of %@" = "Курсы на %@";
 "No currencies match" = "Ничего не найдено";
 
 /* Календарь */
