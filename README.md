@@ -19,6 +19,11 @@ Everything else works as in the original.
 - Type into any row and the others follow
 - A click on the flag opens a search by code, country and currency name
 
+**Codes: two-factor authentication in the panel**
+
+- TOTP codes like Google Authenticator; every account moves over from the iPhone with one QR
+- Secrets live in the macOS keychain, a copied code stays out of the clipboard history
+
 Details and build instructions: [FORK.md](FORK.md) (in Russian).
 
 ---

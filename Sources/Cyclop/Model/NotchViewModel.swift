@@ -4,7 +4,7 @@ import Combine
 @MainActor
 final class NotchViewModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case media, shelf, clipboard, snippets, calendar, translate, currency, notes, teleprompter, utilities, settings
+        case media, shelf, clipboard, snippets, calendar, translate, currency, notes, teleprompter, totp, utilities, settings
         var id: String { rawValue }
 
         var symbol: String {
@@ -18,6 +18,7 @@ final class NotchViewModel: ObservableObject {
             case .currency: return "dollarsign.circle"
             case .notes: return "note.text"
             case .teleprompter: return "text.viewfinder"
+            case .totp: return "lock.shield.fill"
             case .utilities: return "wrench.and.screwdriver.fill"
             case .settings: return "gearshape.fill"
             }
@@ -34,6 +35,7 @@ final class NotchViewModel: ObservableObject {
             case .currency: return localized("Currency")
             case .notes: return localized("Notes")
             case .teleprompter: return localized("Teleprompter")
+            case .totp: return localized("Codes")
             case .utilities: return localized("Utilities")
             case .settings: return localized("Settings")
             }
@@ -73,7 +75,7 @@ final class NotchViewModel: ObservableObject {
         /// calendar, so it sits last, furthest from the tabs people actually
         /// rest on.
         static let leftRail: [Tab] = [.media, .shelf, .clipboard, .snippets, .calendar, .translate]
-        static let rightRail: [Tab] = [.notes, .currency, .teleprompter, .utilities, .settings]
+        static let rightRail: [Tab] = [.notes, .totp, .currency, .teleprompter, .utilities, .settings]
     }
 
     /// What every screen's panel adds up to, kept by `NotchController`: this
@@ -151,7 +153,9 @@ final class NotchViewModel: ObservableObject {
             screenshotFolder.resumeIfEnabled()
         case .currency:
             currencies.start()
-        case .snippets, .translate, .notes, .teleprompter, .utilities, .settings:
+        // Codes: the keychain is read on the first visit to the tab, not here —
+        // a password dialog at login is tied to nothing the user did.
+        case .snippets, .translate, .notes, .teleprompter, .totp, .utilities, .settings:
             break
         }
     }
@@ -166,7 +170,7 @@ final class NotchViewModel: ObservableObject {
         // Taking the tab off the rail with the screen still covered would
         // leave the tap installed and no way back to it.
         case .utilities: keyboardLock.unlock()
-        case .snippets, .translate, .notes, .teleprompter, .settings: break
+        case .snippets, .translate, .notes, .teleprompter, .totp, .settings: break
         }
     }
 
@@ -245,6 +249,7 @@ final class NotchViewModel: ObservableObject {
     let snippets: SnippetStore
     let notes: NoteStore
     let teleprompter: TeleprompterStore
+    let totp: TOTPStore
     /// Shared by every pane that shows something worth not showing.
     let privacy = PrivacyMode()
     /// Here rather than in the controller, which now rebuilds a window per
@@ -265,6 +270,7 @@ final class NotchViewModel: ObservableObject {
         self.snippets = SnippetStore()
         self.notes = NoteStore()
         self.teleprompter = TeleprompterStore()
+        self.totp = TOTPStore()
 
         // The panel header reads through to the stores — counters, the source
         // name, the equalizer. Nested ObservableObjects do not propagate on

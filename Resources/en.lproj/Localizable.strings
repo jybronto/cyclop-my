@@ -141,3 +141,19 @@
 "Keyboard and trackpad are locked" = "Keyboard and trackpad are locked";
 "Hold Esc or − for %d s" = "Hold Esc or − for %d s";
 "Unlocks by itself in %d s" = "Unlocks by itself in %d s";
+
+/* Вкладка аутентификаторов: коды TOTP. */
+"Codes" = "Codes";
+"Authenticator" = "Authenticator";
+"Copy the code" = "Copy the code";
+"Add an authenticator" = "Add an authenticator";
+"Secret or otpauth:// link" = "Secret or otpauth:// link";
+"Take the link or the QR screenshot from the clipboard" = "Take the link or the QR screenshot from the clipboard";
+"Copy this one with the button above" = "Copy this one with the button above";
+"Paste an otpauth:// link, or copy the QR and press +" = "Paste an otpauth:// link, or copy the QR and press +";
+"Not a secret or an otpauth:// link" = "Not a secret or an otpauth:// link";
+"Nothing on the clipboard that looks like an authenticator" = "Nothing on the clipboard that looks like an authenticator";
+"The keychain item cannot be read — nothing was written" = "The keychain item cannot be read — nothing was written";
+"The keychain did not open — click to ask again; nothing is overwritten" = "The keychain did not open — click to ask again; nothing is overwritten";
+"Press again — a deleted secret cannot be brought back" = "Press again — a deleted secret cannot be brought back";
+"Added: %d" = "Added: %d";
