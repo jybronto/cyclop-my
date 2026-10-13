@@ -87,12 +87,16 @@ final class CurrencyStore: ObservableObject {
             .map { $0.lowercased() }
         var unique: [String] = []
         for code in saved where !code.isEmpty && !unique.contains(code) { unique.append(code) }
-        pinned = unique.isEmpty ? Self.defaultList : unique
+        // Locals first: a @Published property cannot be read back until every
+        // stored property has a value.
+        let list = unique.isEmpty ? Self.defaultList : unique
+        let first = list.first ?? Self.base
         let local = Locale.current.currency?.identifier.lowercased()
+        pinned = list
         regionCurrency = (local?.isEmpty ?? true) ? nil : local
         localOverride = UserDefaults.standard.string(forKey: "currency.local")?.lowercased()
-        activeCode = pinned.first ?? Self.base
-        texts = [activeCode: "1"]
+        activeCode = first
+        texts = [first: "1"]
     }
 
     // MARK: - Lifecycle
