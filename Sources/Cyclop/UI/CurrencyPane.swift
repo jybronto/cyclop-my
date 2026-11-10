@@ -113,6 +113,16 @@ struct CurrencyPane: View {
                 currencies.setText("", for: code)
                 return .handled
             }
+            // The empty space around the figure focuses it. Behind the field
+            // and not over the whole row: a tap gesture on the row also fired
+            // for the flag, and took the focus back from the search field the
+            // flag had just opened.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { focused = .row(code) }
+            }
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -120,9 +130,6 @@ struct CurrencyPane: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(isActive ? Theme.surfaceHover : Theme.surface)
         )
-        .contentShape(Rectangle())
-        // Simultaneous, so a click on the field itself still reaches it.
-        .simultaneousGesture(TapGesture().onEnded { focused = .row(code) })
     }
 
     /// Same height as a currency row, but quieter: an outline rather than a
