@@ -15,7 +15,7 @@ Everything else works as in the original.
 
 ![The Currency tab](docs/fork/currency.png)
 
-- Two to five currencies, USD, EUR, UAH, GBP by default, each with its flag
+- Two to five currencies, USD, EUR, RUB by default, each with its flag
 - Type into any row and the others follow
 - A click on the flag swaps the currency (search by code, country and name) or removes the row
 
@@ -54,7 +54,7 @@ that works is below.
 | **Snippets** | A hand-kept list of what you are tired of retyping: an address, a phone number, an email. Added with a button in the panel, removed with the cross on a card; a click puts the text on the clipboard. The same list lives in `~/Library/Application Support/Cyclop/snippets.json` and can be edited there instead |
 | **Calendar** | The next meeting a week ahead: how long until it starts and a button that joins the call — Zoom, Meet, Teams and others. The rest of the meetings as a list |
 | **Translate** | Type on the left, the translation appears on the right — by itself, offline, using macOS's own facilities. English goes to Russian, Russian to English; the direction comes from the script the text is written in. macOS does not preinstall language packs, so the first time you have to download one: System Settings → General → Language & Region → "Translation Languages…" |
-| **Currency** | Your own list of two to five currencies, USD, EUR, UAH, GBP by default. Type into any row and the rest follow; a click on the flag swaps the currency or removes the row, the "+" below adds one. Rates are the one thing in Cyclop that comes over the network — a public table of daily rates, fetched once an hour, and only while the tab is on |
+| **Currency** | Your own list of two to five currencies, USD, EUR, RUB by default. Type into any row and the rest follow; a click on the flag swaps the currency or removes the row, the "+" below adds one. Rates are the one thing in Cyclop that comes over the network — a public table of daily rates, fetched once an hour, and only while the tab is on |
 | **Teleprompter** | A script that scrolls under the camera at a speed you set. The notch is the one place on the screen a teleprompter belongs: reading happens right beside the lens, so on the recording the eyes stay on the camera instead of travelling to a window below it. The panel holds itself open while the text is moving — reading a script means not touching the trackpad |
 | **Notes** | Scratch, on the right rail of icons: jot something down, come back, delete it or carry it off through the clipboard. Hovering lands with the caret ready; blank notes sweep themselves out |
 

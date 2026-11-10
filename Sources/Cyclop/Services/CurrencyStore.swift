@@ -68,7 +68,7 @@ final class CurrencyStore: ObservableObject {
     private static let primaryHost = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1"
     private static let fallbackHost = "https://latest.currency-api.pages.dev/v1"
 
-    static let defaultList = ["usd", "eur", "uah", "gbp"]
+    static let defaultList = ["usd", "eur", "rub"]
 
     init() {
         let saved = (UserDefaults.standard.stringArray(forKey: "currency.list") ?? [])
