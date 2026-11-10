@@ -79,7 +79,7 @@
 /* Валюта */
 "Search currency" = "Поиск валюты";
 "Add currency" = "Добавить валюту";
-"Remove %@ from the list" = "Убрать %@ из списка";
+"Remove" = "Убрать";
 "Updated %@" = "Обновлено %@";
 "Rates of %@" = "Курсы на %@";
 "No currencies match" = "Ничего не найдено";

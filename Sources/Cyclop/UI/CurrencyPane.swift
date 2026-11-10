@@ -131,25 +131,20 @@ struct CurrencyPane: View {
         Button {
             open(.add)
         } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 20)
-                Text(localized("Add currency"))
-                    .font(.system(size: 12, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Theme.tertiary)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Theme.surface, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+            // Just the plus: the tooltip says what it adds.
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.tertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Theme.surface, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .pointerStyle(.default)
+        .help(localized("Add currency"))
     }
 
     // MARK: - Picker
@@ -287,7 +282,7 @@ struct CurrencyPane: View {
                 Image(systemName: "minus.circle")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 18)
-                Text(localized("Remove %@ from the list", code.uppercased()))
+                Text(localized("Remove"))
                     .font(.system(size: 11, weight: .medium))
                 Spacer(minLength: 0)
             }

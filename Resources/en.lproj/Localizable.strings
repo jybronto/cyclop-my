@@ -80,7 +80,7 @@
 /* Currency */
 "Search currency" = "Search currency";
 "Add currency" = "Add currency";
-"Remove %@ from the list" = "Remove %@ from the list";
+"Remove" = "Remove";
 "Updated %@" = "Updated %@";
 "Rates of %@" = "Rates of %@";
 "No currencies match" = "No currencies match";
