@@ -33,7 +33,7 @@ final class CurrencyStore: ObservableObject {
     /// from the region, which only ever guessed the region in Settings and
     /// not where the Mac actually is.
     @Published private(set) var codes: [String] {
-        didSet { defaults.set(codes, forKey: listKey) }
+        didSet { defaults.set(codes, forKey: Self.listKey) }
     }
 
     /// The row the amount was typed into; every other row follows it.
@@ -51,8 +51,8 @@ final class CurrencyStore: ObservableObject {
 
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 60 * 60
-    private let defaults = UserDefaults.standard
-    private let listKey = "currency.list"
+    private let defaults: UserDefaults
+    private static let listKey = "currency.list"
     private static let base = "usd"
     /// Own session rather than `URLSession.shared`: jsDelivr sends
     /// `max-age=604800` on these files, and the shared cache would keep
@@ -70,31 +70,35 @@ final class CurrencyStore: ObservableObject {
 
     static let defaultList = ["usd", "eur", "rub"]
 
-    init() {
-        let saved = (UserDefaults.standard.stringArray(forKey: "currency.list") ?? [])
-            .map { $0.lowercased() }
-        var unique: [String] = []
-        for code in saved where !code.isEmpty && !unique.contains(code) { unique.append(code) }
-        // The version before this one added a "local" row the list did not
-        // hold. Once, on the way over, that row becomes an ordinary one, so
-        // the currency it showed does not vanish with the update.
-        let defaults = UserDefaults.standard
-        if !unique.isEmpty, defaults.object(forKey: "currency.localMigrated") == nil {
-            let local = defaults.string(forKey: "currency.local")?.lowercased()
-                ?? Locale.current.currency?.identifier.lowercased()
-            if let local, !local.isEmpty, !unique.contains(local) { unique.append(local) }
-            defaults.set(true, forKey: "currency.localMigrated")
+    init(defaults: UserDefaults = .standard) {
+        var list = Self.cleaned(defaults.stringArray(forKey: Self.listKey) ?? [])
+        if list.count < Self.minCount {
+            // Versions that kept a pair stored it as two keys. The pair becomes
+            // the first two rows, so an update does not quietly forget what the
+            // user had picked.
+            let pair = Self.cleaned(
+                ["currency.source", "currency.target"].compactMap { defaults.string(forKey: $0) }
+            )
+            if pair.count >= Self.minCount {
+                list = pair
+                defaults.set(list, forKey: Self.listKey)
+            } else {
+                list = Self.defaultList
+            }
         }
-        if unique.count > Self.maxCount { unique = Array(unique.prefix(Self.maxCount)) }
-        // Locals first: a @Published property cannot be read back until every
-        // stored property has a value.
-        let list = unique.count >= Self.minCount ? unique : Self.defaultList
-        let first = list.first ?? Self.base
+        self.defaults = defaults
         codes = list
-        activeCode = first
-        texts = [first: "1"]
-        defaults.removeObject(forKey: "currency.local")
-        if unique.count != saved.count { defaults.set(list, forKey: "currency.list") }
+        activeCode = list[0]
+        texts = [list[0]: "1"]
+    }
+
+    /// Lowercase, no repeats, no more than fits.
+    static func cleaned(_ raw: [String]) -> [String] {
+        var out: [String] = []
+        for code in raw.map({ $0.lowercased() }) where !code.isEmpty && !out.contains(code) {
+            out.append(code)
+        }
+        return Array(out.prefix(maxCount))
     }
 
     // MARK: - Lifecycle
@@ -164,17 +168,24 @@ final class CurrencyStore: ObservableObject {
     }
 
     /// Takes a row out. The one being typed into hands that role, with its
-    /// amount converted, to the first row left.
+    /// amount converted, to the first row left. With no rates to convert by, it
+    /// goes to a row that already shows an amount instead, so removing a row
+    /// offline does not blank the tab.
     func remove(_ code: String) {
         guard canRemove, let index = codes.firstIndex(of: code) else { return }
         var list = codes
         list.remove(at: index)
-        if activeCode == code, let next = list.first {
+        if activeCode == code {
+            let first = list[0]
             if let amount = Self.parse(text(for: code)),
-               let value = Self.convert(amount, from: code, to: next, rates: rates) {
-                texts[next] = Self.format(value)
+               let value = Self.convert(amount, from: code, to: first, rates: rates) {
+                texts[first] = Self.format(value)
+                activeCode = first
+            } else if let shown = list.first(where: { !text(for: $0).isEmpty }) {
+                activeCode = shown
+            } else {
+                activeCode = first
             }
-            activeCode = next
         }
         codes = list
         texts[code] = nil
@@ -359,11 +370,18 @@ final class CurrencyStore: ObservableObject {
     /// Accepts both "1 234,56" and "1234.56". Empty and lone separators are
     /// not numbers — the other field stays put so a mid-edit "1." does not
     /// wipe the result.
-    static func parse(_ text: String) -> Double? {
+    ///
+    /// A lone "," or "." is ambiguous: "4,141" is four thousand in English, and
+    /// every converted row shows exactly that. It is read the way the app's own
+    /// formatter writes numbers: the language's decimal separator is a decimal
+    /// point, and its grouping separator is a grouping only when the groups are
+    /// of three ("4,141" but not "1,5").
+    static func parse(_ text: String, locale: Locale = Locale(identifier: appLanguage)) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var normalized = trimmed
             .replacingOccurrences(of: "\u{00a0}", with: "")
+            .replacingOccurrences(of: "\u{202f}", with: "")
             .replacingOccurrences(of: " ", with: "")
         if normalized.contains(","), normalized.contains(".") {
             // "1,234.56" vs "1.234,56" — the rightmost separator is decimal.
@@ -376,11 +394,25 @@ final class CurrencyStore: ObservableObject {
                     normalized = normalized.replacingOccurrences(of: ",", with: "")
                 }
             }
-        } else {
-            normalized = normalized.replacingOccurrences(of: ",", with: ".")
+        } else if let separator = normalized.first(where: { $0 == "," || $0 == "." }) {
+            let decimal = locale.decimalSeparator ?? "."
+            let grouping = locale.groupingSeparator ?? ","
+            if String(separator) != decimal, String(separator) == grouping, isGrouped(normalized, by: separator) {
+                normalized = normalized.replacingOccurrences(of: String(separator), with: "")
+            } else {
+                normalized = normalized.replacingOccurrences(of: ",", with: ".")
+            }
         }
         guard let value = Double(normalized), value.isFinite else { return nil }
         return value
+    }
+
+    /// "4,141", "1,234,567" — one to three digits, then groups of exactly three.
+    private static func isGrouped(_ text: String, by separator: Character) -> Bool {
+        let parts = text.split(separator: separator, omittingEmptySubsequences: false)
+        guard parts.count >= 2, (1...3).contains(parts[0].count) else { return false }
+        return parts.allSatisfy { $0.allSatisfy(\.isNumber) }
+            && parts.dropFirst().allSatisfy { $0.count == 3 }
     }
 
     /// Compact enough for the panel: whole numbers stay whole, fiat keeps a
