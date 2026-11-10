@@ -79,8 +79,8 @@
 
 /* Currency */
 "Search currency" = "Search currency";
-"Local currency" = "Local currency";
-"By region in System Settings" = "By region in System Settings";
+"Add currency" = "Add currency";
+"Remove" = "Remove";
 "Updated %@" = "Updated %@";
 "Rates of %@" = "Rates of %@";
 "No currencies match" = "No currencies match";

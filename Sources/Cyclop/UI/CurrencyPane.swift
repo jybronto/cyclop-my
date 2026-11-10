@@ -2,12 +2,12 @@ import SwiftUI
 
 /// The currencies the user keeps, one per row, all converted from whichever
 /// row was typed into last — the shape of a pocket converter rather than a
-/// pair. Five rows fit the standard body: four picked by hand and the one of
-/// the Mac's region, marked with an arrow, unless it is among the four.
+/// pair. Two to five rows: five is what the standard body holds.
 ///
-/// A click on the amount focuses it; a click on the flag and code opens the
-/// list to put another currency in that row. On the local row the list also
-/// offers to go back to following the region in System Settings.
+/// A click on the amount focuses it. A click on the flag and code opens the
+/// list of currencies for that row: pick one to put it there instead, or take
+/// the row out at the top of the list. Below the rows, while there is room,
+/// a last row adds a currency through the same list.
 struct CurrencyPane: View {
     @ObservedObject var currencies: CurrencyStore
     @Binding var wantsKeyboard: Bool
@@ -17,9 +17,14 @@ struct CurrencyPane: View {
         case search
     }
 
+    /// What the open list is for: another currency in this row, or a new row.
+    private enum Picking: Equatable {
+        case replace(String)
+        case add
+    }
+
     @FocusState private var focused: Field?
-    /// The row whose currency is being replaced, while the list is open.
-    @State private var picking: String?
+    @State private var picking: Picking?
     @State private var query = ""
 
     var body: some View {
@@ -57,22 +62,28 @@ struct CurrencyPane: View {
                 .padding(.top, 8)
         } else {
             VStack(spacing: 2) {
-                ForEach(currencies.rows, id: \.self) { code in
+                ForEach(currencies.codes, id: \.self) { code in
                     row(code)
+                }
+                if currencies.canAdd {
+                    addRow
                 }
             }
         }
     }
 
+    private func open(_ what: Picking) {
+        query = ""
+        picking = what
+        if wantsKeyboard { focused = .search }
+    }
+
     private func row(_ code: String) -> some View {
-        let isLocal = code == currencies.localCode
         let isActive = code == currencies.activeCode
 
         return HStack(spacing: 8) {
             Button {
-                query = ""
-                picking = code
-                if wantsKeyboard { focused = .search }
+                open(.replace(code))
             } label: {
                 HStack(spacing: 7) {
                     Text(CurrencyStore.flag(for: code) ?? "")
@@ -81,12 +92,6 @@ struct CurrencyPane: View {
                     Text(code.uppercased())
                         .font(.system(size: 12, weight: .semibold).monospaced())
                         .foregroundStyle(Theme.secondary)
-                    if isLocal {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(Theme.tertiary)
-                            .help(localized("Local currency"))
-                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -120,10 +125,36 @@ struct CurrencyPane: View {
         .simultaneousGesture(TapGesture().onEnded { focused = .row(code) })
     }
 
+    /// Same height as a currency row, but quieter: an outline rather than a
+    /// fill, so it reads as room for one more and not as a row with no value.
+    private var addRow: some View {
+        Button {
+            open(.add)
+        } label: {
+            // Just the plus, on the left where the flags are: the tooltip
+            // says what it adds. Brighter than the other quiet things in the
+            // panel, since it is the only way to a new row.
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 20)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Theme.surface, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.default)
+        .help(localized("Add currency"))
+    }
+
     // MARK: - Picker
 
-    private func picker(for selected: String) -> some View {
-        let isLocalRow = selected == currencies.localCode && !currencies.pinned.contains(selected)
+    private func picker(for what: Picking) -> some View {
+        let selected: String? = if case .replace(let code) = what { code } else { nil }
         let matches = currencies.filtered(query: query)
 
         return VStack(spacing: 6) {
@@ -182,14 +213,18 @@ struct CurrencyPane: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        if isLocalRow, query.isEmpty {
-                            automaticRow
+                        if let selected, query.isEmpty, currencies.canRemove {
+                            removeRow(selected)
                         }
                         ForEach(matches) { currency in
                             Button {
-                                choose(currency.code, replacing: selected)
+                                choose(currency.code, for: what)
                             } label: {
-                                pickerRow(currency, isSelected: currency.code == selected)
+                                pickerRow(
+                                    currency,
+                                    isSelected: currency.code == selected,
+                                    isListed: currencies.codes.contains(currency.code)
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -202,7 +237,7 @@ struct CurrencyPane: View {
 
     /// Flag, code, country, and the currency's own name dimmed after it:
     /// people look for "Украина" as often as for "UAH".
-    private func pickerRow(_ currency: CurrencyStore.Currency, isSelected: Bool) -> some View {
+    private func pickerRow(_ currency: CurrencyStore.Currency, isSelected: Bool, isListed: Bool) -> some View {
         HStack(spacing: 8) {
             Text(CurrencyStore.flag(for: currency.code) ?? "")
                 .font(.system(size: 13))
@@ -222,10 +257,12 @@ struct CurrencyPane: View {
                 .foregroundStyle(Theme.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            if isSelected {
+            // Already a row in the tab: picking it swaps the two rows when
+            // replacing, and does nothing when adding.
+            if isSelected || isListed {
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isSelected ? .white : Theme.tertiary)
             }
         }
         .padding(.horizontal, 8)
@@ -237,41 +274,36 @@ struct CurrencyPane: View {
         .contentShape(Rectangle())
     }
 
-    /// Back to the region from System Settings, for the local row only.
-    private var automaticRow: some View {
+    /// Takes the row out, first in the list it opened, so the one action
+    /// that is not "pick a currency" does not have to be hunted for. Absent
+    /// when two rows are left: one currency is not a conversion.
+    private func removeRow(_ code: String) -> some View {
         Button {
-            currencies.setLocal(nil)
+            currencies.remove(code)
             closePicker()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
+                Image(systemName: "minus.circle")
+                    .font(.system(size: 11, weight: .semibold))
                     .frame(width: 18)
-                Text(localized("By region in System Settings"))
+                Text(localized("Remove"))
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                if let region = currencies.regionCurrency {
-                    Text(region.uppercased())
-                        .font(.system(size: 11).monospaced())
-                        .foregroundStyle(Theme.tertiary)
-                }
                 Spacer(minLength: 0)
-                if currencies.localOverride == nil {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                }
             }
+            .foregroundStyle(Color.red.opacity(0.85))
             .padding(.horizontal, 8)
             .frame(height: 26)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.default)
     }
 
-    private func choose(_ code: String, replacing old: String) {
-        currencies.replace(old, with: code)
+    private func choose(_ code: String, for what: Picking) {
+        switch what {
+        case .replace(let old): currencies.replace(old, with: code)
+        case .add: currencies.add(code)
+        }
         closePicker()
     }
 
