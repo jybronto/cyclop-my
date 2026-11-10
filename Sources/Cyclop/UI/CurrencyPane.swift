@@ -131,11 +131,15 @@ struct CurrencyPane: View {
         Button {
             open(.add)
         } label: {
-            // Just the plus: the tooltip says what it adds.
+            // Just the plus, on the left where the flags are: the tooltip
+            // says what it adds. Brighter than the other quiet things in the
+            // panel, since it is the only way to a new row.
             Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.tertiary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 20)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .strokeBorder(Theme.surface, lineWidth: 1)
