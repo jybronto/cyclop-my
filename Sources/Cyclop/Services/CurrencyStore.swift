@@ -4,9 +4,12 @@ import Foundation
 /// Live exchange rates from [fawazahmed0/exchange-api](https://github.com/fawazahmed0/exchange-api).
 ///
 /// The CDN is the primary host; Cloudflare Pages is the documented fallback.
-/// Rates land once a day upstream, so this store refreshes every few hours and
-/// again whenever the source currency changes — that is the base the API
-/// returns rates against.
+/// Rates land once a day upstream, so this store refreshes every hour while
+/// the tab is on and again whenever the tab is opened.
+///
+/// One table, always against USD: every row in the list is converted through
+/// it (`amount / rates[from] * rates[to]`), so five currencies cost the same
+/// single request that two did.
 @MainActor
 final class CurrencyStore: ObservableObject {
     struct Currency: Identifiable, Hashable {
@@ -16,48 +19,41 @@ final class CurrencyStore: ObservableObject {
         var displayCode: String { code.uppercased() }
     }
 
-    /// Which amount field last drove the pair — typing on one side must not
-    /// bounce back through the other and fight the caret.
-    enum Side { case source, target }
-
     @Published private(set) var currencies: [Currency] = []
-    /// Rates for `rateBase`, keyed by lowercase code: one unit of the base
-    /// buys this many of the key.
+    /// One US dollar buys this many of the key (lowercase code).
     @Published private(set) var rates: [String: Double] = [:]
-    @Published private(set) var rateBase = ""
     @Published private(set) var rateDate: String?
+    /// When the table last arrived — what the header shows as "Updated".
+    @Published private(set) var updatedAt: Date?
     @Published private(set) var isLoading = false
     @Published private(set) var failure: String?
 
-    @Published var sourceCode: String {
-        didSet {
-            guard sourceCode != oldValue else { return }
-            persistPair()
-            Task { await refreshRates(force: true) }
-            if !suppressSideEffects { recompute(from: .source) }
-        }
+    /// The currencies the tab lists, in the order the user put them.
+    /// Nothing is added on the user's behalf: no "local" currency guessed
+    /// from the region, which only ever guessed the region in Settings and
+    /// not where the Mac actually is.
+    @Published private(set) var codes: [String] {
+        didSet { defaults.set(codes, forKey: Self.listKey) }
     }
 
-    @Published var targetCode: String {
-        didSet {
-            guard targetCode != oldValue else { return }
-            persistPair()
-            if !suppressSideEffects { recompute(from: .source) }
-        }
-    }
+    /// The row the amount was typed into; every other row follows it.
+    @Published private(set) var activeCode: String
+    /// What each row shows, keyed by lowercase code.
+    @Published private(set) var texts: [String: String] = [:]
 
-    @Published var sourceText = "1"
-    @Published var targetText = ""
+    /// Fewer than two is not a conversion; more than five does not fit the
+    /// standard body without scrolling.
+    static let minCount = 2
+    static let maxCount = 5
+
+    var canAdd: Bool { codes.count < Self.maxCount }
+    var canRemove: Bool { codes.count > Self.minCount }
 
     private var timer: Timer?
-    private var editing: Side = .source
-    /// Quiet while both ends of a swap are rewritten, so the intermediate
-    /// equal-codes moment never fires a convert against the wrong rate table.
-    private var suppressSideEffects = false
     private let refreshInterval: TimeInterval = 60 * 60
-    private let defaults = UserDefaults.standard
-    private let sourceKey = "currency.source"
-    private let targetKey = "currency.target"
+    private let defaults: UserDefaults
+    private static let listKey = "currency.list"
+    private static let base = "usd"
     /// Own session rather than `URLSession.shared`: jsDelivr sends
     /// `max-age=604800` on these files, and the shared cache would keep
     /// serving yesterday's rates for a week no matter how often we "refresh".
@@ -72,23 +68,37 @@ final class CurrencyStore: ObservableObject {
     private static let primaryHost = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1"
     private static let fallbackHost = "https://latest.currency-api.pages.dev/v1"
 
-    init() {
-        let savedSource = defaults.string(forKey: sourceKey)?.lowercased()
-        let savedTarget = defaults.string(forKey: targetKey)?.lowercased()
-        sourceCode = savedSource ?? Self.defaultSource
-        targetCode = savedTarget ?? Self.defaultTarget
-        if sourceCode == targetCode {
-            targetCode = sourceCode == "usd" ? "eur" : "usd"
+    static let defaultList = ["usd", "eur", "rub"]
+
+    init(defaults: UserDefaults = .standard) {
+        var list = Self.cleaned(defaults.stringArray(forKey: Self.listKey) ?? [])
+        if list.count < Self.minCount {
+            // Versions that kept a pair stored it as two keys. The pair becomes
+            // the first two rows, so an update does not quietly forget what the
+            // user had picked.
+            let pair = Self.cleaned(
+                ["currency.source", "currency.target"].compactMap { defaults.string(forKey: $0) }
+            )
+            if pair.count >= Self.minCount {
+                list = pair
+                defaults.set(list, forKey: Self.listKey)
+            } else {
+                list = Self.defaultList
+            }
         }
+        self.defaults = defaults
+        codes = list
+        activeCode = list[0]
+        texts = [list[0]: "1"]
     }
 
-    /// USD out, and the Mac's own currency in — or RUB when the locale has no
-    /// currency of its own worth converting against.
-    private static var defaultSource: String { "usd" }
-    private static var defaultTarget: String {
-        let code = Locale.current.currency?.identifier.lowercased()
-        if let code, code != "usd", !code.isEmpty { return code }
-        return "rub"
+    /// Lowercase, no repeats, no more than fits.
+    static func cleaned(_ raw: [String]) -> [String] {
+        var out: [String] = []
+        for code in raw.map({ $0.lowercased() }) where !code.isEmpty && !out.contains(code) {
+            out.append(code)
+        }
+        return Array(out.prefix(maxCount))
     }
 
     // MARK: - Lifecycle
@@ -97,7 +107,7 @@ final class CurrencyStore: ObservableObject {
         Task { await bootstrap() }
         timer?.invalidate()
         let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refreshRates(force: true) }
+            Task { @MainActor in await self?.refreshRates() }
         }
         // Common Mode, not just the default one: while a tracking loop or a
         // scroll is running the default mode pauses, and a currency refresh
@@ -115,49 +125,131 @@ final class CurrencyStore: ObservableObject {
     /// already in memory is what made yesterday's rates look permanent: the
     /// timer alone is not enough if the app was quit overnight.
     func refreshIfNeeded() {
-        Task { await refreshRates(force: true) }
+        Task { await refreshRates() }
     }
 
     // MARK: - Amounts
 
-    func setSourceText(_ text: String) {
-        editing = .source
-        sourceText = text
-        recompute(from: .source)
+    func text(for code: String) -> String {
+        texts[code] ?? ""
     }
 
-    func setTargetText(_ text: String) {
-        editing = .target
-        targetText = text
-        recompute(from: .target)
+    /// Typing into a row makes it the one the others follow.
+    func setText(_ text: String, for code: String) {
+        activeCode = code
+        texts[code] = text
+        recompute()
     }
 
-    func swap() {
-        let previousSource = sourceCode
-        let previousSourceText = sourceText
-        suppressSideEffects = true
-        sourceCode = targetCode
-        targetCode = previousSource
-        suppressSideEffects = false
-        // Keep the figure that was typed; the other side follows once rates
-        // for the new source land. If they are already cached, recompute now.
-        sourceText = previousSourceText
-        editing = .source
-        if rateBase == sourceCode {
-            recompute(from: .source)
+    /// Puts `code` in place of `old`. A currency already in the list trades
+    /// places with it instead of appearing twice.
+    func replace(_ old: String, with code: String) {
+        guard old != code, let index = codes.firstIndex(of: old) else { return }
+        var list = codes
+        if let existing = list.firstIndex(of: code) {
+            list.swapAt(index, existing)
+        } else {
+            list[index] = code
         }
+        codes = list
+        if activeCode == old, !list.contains(old) {
+            texts[code] = texts[old]
+            activeCode = code
+        }
+        if !list.contains(old) { texts[old] = nil }
+        recompute()
+    }
+
+    /// Appends a row. A currency already listed is not added twice.
+    func add(_ code: String) {
+        guard canAdd, !codes.contains(code) else { return }
+        codes.append(code)
+        recompute()
+    }
+
+    /// Takes a row out. The one being typed into hands that role, with its
+    /// amount converted, to the first row left. With no rates to convert by, it
+    /// goes to a row that already shows an amount instead, so removing a row
+    /// offline does not blank the tab.
+    func remove(_ code: String) {
+        guard canRemove, let index = codes.firstIndex(of: code) else { return }
+        var list = codes
+        list.remove(at: index)
+        if activeCode == code {
+            let first = list[0]
+            if let amount = Self.parse(text(for: code)),
+               let value = Self.convert(amount, from: code, to: first, rates: rates) {
+                texts[first] = Self.format(value)
+                activeCode = first
+            } else if let shown = list.first(where: { !text(for: $0).isEmpty }) {
+                activeCode = shown
+            } else {
+                activeCode = first
+            }
+        }
+        codes = list
+        texts[code] = nil
+        recompute()
     }
 
     func filtered(query: String) -> [Currency] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return currencies }
         return currencies.filter {
-            $0.code.contains(q) || $0.name.lowercased().contains(q)
+            $0.code.contains(q)
+                || $0.name.lowercased().contains(q)
+                || (Self.countryName(for: $0.code)?.lowercased().contains(q) ?? false)
+                || (Self.localizedName(for: $0.code)?.lowercased().contains(q) ?? false)
         }
     }
 
     func name(for code: String) -> String {
-        currencies.first { $0.code == code }?.name ?? code.uppercased()
+        Self.localizedName(for: code)
+            ?? currencies.first { $0.code == code }?.name
+            ?? code.uppercased()
+    }
+
+    /// Country a currency belongs to. Most ISO 4217 codes start with the
+    /// issuing country's ISO 3166 code (USD → US, UAH → UA); the euro answers
+    /// to EU. Codes that start with X (gold, SDR, the CFA francs) and crypto
+    /// have no country, and get nothing rather than a wrong one.
+    static func region(for code: String) -> String? {
+        let upper = code.uppercased()
+        guard upper.count == 3, upper.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        if upper == "EUR" { return "EU" }
+        // Only real ISO 4217 codes: BTC would otherwise borrow Bhutan's flag
+        // and ETH Ethiopia's.
+        guard Self.isoCurrencies.contains(upper) else { return nil }
+        let region = String(upper.prefix(2))
+        guard Locale.Region.isoRegions.contains(where: { $0.identifier == region }) else { return nil }
+        return region
+    }
+
+    private static let isoCurrencies = Set(Locale.Currency.isoCurrencies.map(\.identifier))
+
+    static func flag(for code: String) -> String? {
+        guard let region = region(for: code) else { return nil }
+        let scalars = region.unicodeScalars.compactMap { Unicode.Scalar(0x1F1E6 + $0.value - 65) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    /// In the app's language: "Украина", "Ukraine".
+    static func countryName(for code: String) -> String? {
+        guard let region = region(for: code) else { return nil }
+        return Locale(identifier: appLanguage).localizedString(forRegionCode: region)
+    }
+
+    /// The system's own name for the currency, in the app's language — the
+    /// rate source only has English ones.
+    static func localizedName(for code: String) -> String? {
+        Locale(identifier: appLanguage).localizedString(forCurrencyCode: code.uppercased())
+    }
+
+    /// `amount` of `from` in `to`, through a table quoted against one base.
+    /// Nil when either side is missing from the table.
+    static func convert(_ amount: Double, from: String, to: String, rates: [String: Double]) -> Double? {
+        guard let a = rates[from], a > 0, let b = rates[to] else { return nil }
+        return amount / a * b
     }
 
     // MARK: - Networking
@@ -167,41 +259,25 @@ final class CurrencyStore: ObservableObject {
         defer { isLoading = false }
         do {
             try await loadCurrencies()
-            try await loadRates(for: sourceCode)
+            try await loadRates()
             failure = nil
-            recompute(from: editing)
+            recompute()
         } catch {
             failure = error.localizedDescription
         }
     }
 
-    private func refreshRates(force: Bool) async {
-        if !force, rateBase == sourceCode, !rates.isEmpty, !isStaleDate { return }
+    private func refreshRates() async {
         do {
             if currencies.isEmpty { try await loadCurrencies() }
-            try await loadRates(for: sourceCode)
+            try await loadRates()
             failure = nil
-            recompute(from: editing)
+            recompute()
         } catch {
             // Keep whatever rates we already have; only surface the error when
             // there is nothing to convert with.
             if rates.isEmpty { failure = error.localizedDescription }
         }
-    }
-
-    /// Upstream publishes once a day. A table whose `date` is not today is the
-    /// one case where skipping a refresh is definitely wrong.
-    private var isStaleDate: Bool {
-        guard let rateDate else { return true }
-        return rateDate != Self.todayStamp()
-    }
-
-    private static func todayStamp() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
     }
 
     private func loadCurrencies() async throws {
@@ -220,16 +296,10 @@ final class CurrencyStore: ObservableObject {
                 }
                 return $0.code < $1.code
             }
-        if !currencies.contains(where: { $0.code == sourceCode }) {
-            sourceCode = currencies.first?.code ?? "usd"
-        }
-        if !currencies.contains(where: { $0.code == targetCode }) {
-            targetCode = currencies.first { $0.code != sourceCode }?.code ?? "eur"
-        }
     }
 
-    private func loadRates(for base: String) async throws {
-        let code = base.lowercased()
+    private func loadRates() async throws {
+        let code = Self.base
         let data = try await fetch("currencies/\(code).min.json")
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let date = object?["date"] as? String
@@ -243,8 +313,8 @@ final class CurrencyStore: ObservableObject {
             }
         }
         rates = parsed
-        rateBase = code
         rateDate = date
+        updatedAt = Date()
     }
 
     /// Tries the jsDelivr CDN first, then the Cloudflare Pages mirror the
@@ -272,36 +342,23 @@ final class CurrencyStore: ObservableObject {
 
     // MARK: - Conversion
 
-    private func recompute(from side: Side) {
-        // Rates belong to a specific base. Stale tables from the previous
-        // source must not invent a conversion.
-        guard rateBase == sourceCode.lowercased(),
-              let rate = rates[targetCode.lowercased()], rate > 0 else {
+    /// Rewrites every row but the one being typed into. An empty or half-typed
+    /// amount ("1.") leaves the others as they are, so the caret never fights
+    /// a figure that is about to change anyway — except empty, which empties.
+    private func recompute() {
+        let source = text(for: activeCode)
+        if source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            for code in codes where code != activeCode { texts[code] = "" }
             return
         }
-        switch side {
-        case .source:
-            let trimmed = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                targetText = ""
-                return
+        guard !rates.isEmpty, let amount = Self.parse(source) else { return }
+        for code in codes where code != activeCode {
+            if let value = Self.convert(amount, from: activeCode, to: code, rates: rates) {
+                texts[code] = Self.format(value)
+            } else {
+                texts[code] = ""
             }
-            guard let amount = Self.parse(sourceText) else { return }
-            targetText = Self.format(amount * rate)
-        case .target:
-            let trimmed = targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                sourceText = ""
-                return
-            }
-            guard let amount = Self.parse(targetText) else { return }
-            sourceText = Self.format(amount / rate)
         }
-    }
-
-    private func persistPair() {
-        defaults.set(sourceCode, forKey: sourceKey)
-        defaults.set(targetCode, forKey: targetKey)
     }
 
     /// Currencies people actually reach for, pinned to the top of the picker.
@@ -313,11 +370,18 @@ final class CurrencyStore: ObservableObject {
     /// Accepts both "1 234,56" and "1234.56". Empty and lone separators are
     /// not numbers — the other field stays put so a mid-edit "1." does not
     /// wipe the result.
-    static func parse(_ text: String) -> Double? {
+    ///
+    /// A lone "," or "." is ambiguous: "4,141" is four thousand in English, and
+    /// every converted row shows exactly that. It is read the way the app's own
+    /// formatter writes numbers: the language's decimal separator is a decimal
+    /// point, and its grouping separator is a grouping only when the groups are
+    /// of three ("4,141" but not "1,5").
+    static func parse(_ text: String, locale: Locale = Locale(identifier: appLanguage)) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var normalized = trimmed
             .replacingOccurrences(of: "\u{00a0}", with: "")
+            .replacingOccurrences(of: "\u{202f}", with: "")
             .replacingOccurrences(of: " ", with: "")
         if normalized.contains(","), normalized.contains(".") {
             // "1,234.56" vs "1.234,56" — the rightmost separator is decimal.
@@ -330,11 +394,25 @@ final class CurrencyStore: ObservableObject {
                     normalized = normalized.replacingOccurrences(of: ",", with: "")
                 }
             }
-        } else {
-            normalized = normalized.replacingOccurrences(of: ",", with: ".")
+        } else if let separator = normalized.first(where: { $0 == "," || $0 == "." }) {
+            let decimal = locale.decimalSeparator ?? "."
+            let grouping = locale.groupingSeparator ?? ","
+            if String(separator) != decimal, String(separator) == grouping, isGrouped(normalized, by: separator) {
+                normalized = normalized.replacingOccurrences(of: String(separator), with: "")
+            } else {
+                normalized = normalized.replacingOccurrences(of: ",", with: ".")
+            }
         }
         guard let value = Double(normalized), value.isFinite else { return nil }
         return value
+    }
+
+    /// "4,141", "1,234,567" — one to three digits, then groups of exactly three.
+    private static func isGrouped(_ text: String, by separator: Character) -> Bool {
+        let parts = text.split(separator: separator, omittingEmptySubsequences: false)
+        guard parts.count >= 2, (1...3).contains(parts[0].count) else { return false }
+        return parts.allSatisfy { $0.allSatisfy(\.isNumber) }
+            && parts.dropFirst().allSatisfy { $0.count == 3 }
     }
 
     /// Compact enough for the panel: whole numbers stay whole, fiat keeps a

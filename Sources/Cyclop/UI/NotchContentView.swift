@@ -234,10 +234,11 @@ private struct CurrencyRateDate: View {
     @ObservedObject var currencies: CurrencyStore
 
     var body: some View {
-        if let date = currencies.rateDate {
-            Text(date)
+        if let updated = currencies.updatedAt {
+            Text(localized("Updated %@", CalendarPane.clock.string(from: updated)))
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(Theme.tertiary)
+                .help(currencies.rateDate.map { localized("Rates of %@", $0) } ?? "")
         }
     }
 }
