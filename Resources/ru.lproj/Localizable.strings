@@ -78,8 +78,8 @@
 
 /* Валюта */
 "Search currency" = "Поиск валюты";
-"Local currency" = "Местная валюта";
-"By region in System Settings" = "По региону в Системных настройках";
+"Add currency" = "Добавить валюту";
+"Remove %@ from the list" = "Убрать %@ из списка";
 "Updated %@" = "Обновлено %@";
 "Rates of %@" = "Курсы на %@";
 "No currencies match" = "Ничего не найдено";

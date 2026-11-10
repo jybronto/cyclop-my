@@ -28,10 +28,12 @@ final class CurrencyStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var failure: String?
 
-    /// The currencies the user picked, in order. The local one is added after
-    /// them by `rows` unless it is already here.
-    @Published private(set) var pinned: [String] {
-        didSet { defaults.set(pinned, forKey: listKey) }
+    /// The currencies the tab lists, in the order the user put them.
+    /// Nothing is added on the user's behalf: no "local" currency guessed
+    /// from the region, which only ever guessed the region in Settings and
+    /// not where the Mac actually is.
+    @Published private(set) var codes: [String] {
+        didSet { defaults.set(codes, forKey: listKey) }
     }
 
     /// The row the amount was typed into; every other row follows it.
@@ -39,32 +41,18 @@ final class CurrencyStore: ObservableObject {
     /// What each row shows, keyed by lowercase code.
     @Published private(set) var texts: [String: String] = [:]
 
-    /// Currency of the region set in System Settings → Language & Region.
-    /// The region, not the location: knowing where the Mac actually is would
-    /// cost a Location permission, and the project asks for none it can avoid.
-    let regionCurrency: String?
+    /// Fewer than two is not a conversion; more than five does not fit the
+    /// standard body without scrolling.
+    static let minCount = 2
+    static let maxCount = 5
 
-    /// Chosen by hand from the list, for when the region in System Settings
-    /// is not where the Mac is — a trip, say. Nil follows the region.
-    @Published private(set) var localOverride: String? {
-        didSet { defaults.set(localOverride, forKey: localKey) }
-    }
-
-    /// The row marked with the arrow.
-    var localCode: String? { localOverride ?? regionCurrency }
-
-    /// What the tab lists: the pinned currencies, then the local one if it is
-    /// not among them already.
-    var rows: [String] {
-        guard let localCode, !pinned.contains(localCode) else { return pinned }
-        return pinned + [localCode]
-    }
+    var canAdd: Bool { codes.count < Self.maxCount }
+    var canRemove: Bool { codes.count > Self.minCount }
 
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 60 * 60
     private let defaults = UserDefaults.standard
     private let listKey = "currency.list"
-    private let localKey = "currency.local"
     private static let base = "usd"
     /// Own session rather than `URLSession.shared`: jsDelivr sends
     /// `max-age=604800` on these files, and the shared cache would keep
@@ -87,16 +75,26 @@ final class CurrencyStore: ObservableObject {
             .map { $0.lowercased() }
         var unique: [String] = []
         for code in saved where !code.isEmpty && !unique.contains(code) { unique.append(code) }
+        // The version before this one added a "local" row the list did not
+        // hold. Once, on the way over, that row becomes an ordinary one, so
+        // the currency it showed does not vanish with the update.
+        let defaults = UserDefaults.standard
+        if !unique.isEmpty, defaults.object(forKey: "currency.localMigrated") == nil {
+            let local = defaults.string(forKey: "currency.local")?.lowercased()
+                ?? Locale.current.currency?.identifier.lowercased()
+            if let local, !local.isEmpty, !unique.contains(local) { unique.append(local) }
+            defaults.set(true, forKey: "currency.localMigrated")
+        }
+        if unique.count > Self.maxCount { unique = Array(unique.prefix(Self.maxCount)) }
         // Locals first: a @Published property cannot be read back until every
         // stored property has a value.
-        let list = unique.isEmpty ? Self.defaultList : unique
+        let list = unique.count >= Self.minCount ? unique : Self.defaultList
         let first = list.first ?? Self.base
-        let local = Locale.current.currency?.identifier.lowercased()
-        pinned = list
-        regionCurrency = (local?.isEmpty ?? true) ? nil : local
-        localOverride = UserDefaults.standard.string(forKey: "currency.local")?.lowercased()
+        codes = list
         activeCode = first
         texts = [first: "1"]
+        defaults.removeObject(forKey: "currency.local")
+        if unique.count != saved.count { defaults.set(list, forKey: "currency.list") }
     }
 
     // MARK: - Lifecycle
@@ -141,38 +139,45 @@ final class CurrencyStore: ObservableObject {
 
     /// Puts `code` in place of `old`. A currency already in the list trades
     /// places with it instead of appearing twice.
-    ///
-    /// The local row is not in `pinned`: replacing it sets the override, and
-    /// a currency already in the list then simply carries the arrow.
     func replace(_ old: String, with code: String) {
-        guard old != code else { return }
-        guard let index = pinned.firstIndex(of: old) else {
-            if old == localCode { setLocal(code) }
-            return
-        }
-        var list = pinned
+        guard old != code, let index = codes.firstIndex(of: old) else { return }
+        var list = codes
         if let existing = list.firstIndex(of: code) {
             list.swapAt(index, existing)
         } else {
             list[index] = code
         }
-        pinned = list
+        codes = list
         if activeCode == old, !list.contains(old) {
             texts[code] = texts[old]
             activeCode = code
         }
-        if !rows.contains(old) { texts[old] = nil }
+        if !list.contains(old) { texts[old] = nil }
         recompute()
     }
 
-    /// Nil goes back to following the region.
-    func setLocal(_ code: String?) {
-        let old = localCode
-        localOverride = code == regionCurrency ? nil : code
-        if let old, activeCode == old, !rows.contains(old), let new = localCode {
-            texts[new] = texts[old]
-            activeCode = new
+    /// Appends a row. A currency already listed is not added twice.
+    func add(_ code: String) {
+        guard canAdd, !codes.contains(code) else { return }
+        codes.append(code)
+        recompute()
+    }
+
+    /// Takes a row out. The one being typed into hands that role, with its
+    /// amount converted, to the first row left.
+    func remove(_ code: String) {
+        guard canRemove, let index = codes.firstIndex(of: code) else { return }
+        var list = codes
+        list.remove(at: index)
+        if activeCode == code, let next = list.first {
+            if let amount = Self.parse(text(for: code)),
+               let value = Self.convert(amount, from: code, to: next, rates: rates) {
+                texts[next] = Self.format(value)
+            }
+            activeCode = next
         }
+        codes = list
+        texts[code] = nil
         recompute()
     }
 
@@ -332,11 +337,11 @@ final class CurrencyStore: ObservableObject {
     private func recompute() {
         let source = text(for: activeCode)
         if source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            for code in rows where code != activeCode { texts[code] = "" }
+            for code in codes where code != activeCode { texts[code] = "" }
             return
         }
         guard !rates.isEmpty, let amount = Self.parse(source) else { return }
-        for code in rows where code != activeCode {
+        for code in codes where code != activeCode {
             if let value = Self.convert(amount, from: activeCode, to: code, rates: rates) {
                 texts[code] = Self.format(value)
             } else {
