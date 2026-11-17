@@ -31,13 +31,12 @@ struct TeleprompterPane: View {
             // in mid-word.
             if !wants, !prompter.script.isEmpty { editing = false }
         }
-        // Arriving puts the script back at the top. A take starts at the
-        // beginning, and mid-take nobody is switching tabs — so the only way
-        // to arrive on a script left halfway is to have finished with it, and
-        // the one thing that must not happen then is opening onto the blank
-        // space past the last line with no way to tell why it is blank.
+        // Arriving keeps the place the script was paused at: pausing, moving
+        // the pointer away and coming back has to find the same line, not the
+        // first one. Only a script read to the end goes back to the top, so
+        // the tab never opens onto the last line with nothing left to read.
         .onAppear {
-            prompter.rewind()
+            if prompter.offset >= prompter.maxOffset { prompter.rewind() }
             // An empty script has nothing to read, so the tab opens into the
             // editor — and an editor the keyboard never reaches is a field
             // that cannot be typed or pasted into at all (#53). The one button
@@ -107,6 +106,10 @@ struct TeleprompterPane: View {
             // the hand left it.
             .scrollDisabled(true)
             .background(ScrollWheelReader { prompter.scroll(by: -$0) })
+            // A click anywhere on the script is play/pause — the same as the
+            // button, but a target the size of the whole text.
+            .contentShape(Rectangle())
+            .onTapGesture { prompter.toggle() }
             .overlay(alignment: .top) { fade(.top) }
             .overlay(alignment: .bottom) { fade(.bottom) }
             .onAppear { prompter.viewportHeight = outer.size.height }
