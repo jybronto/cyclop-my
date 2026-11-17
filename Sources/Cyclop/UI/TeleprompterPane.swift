@@ -99,7 +99,14 @@ struct TeleprompterPane: View {
                     )
                     .offset(y: -prompter.offset)
             }
+            // The ScrollView's own scrolling stays off: position is the
+            // store's `offset`, which the clock advances. The wheel and the
+            // trackpad move that same offset instead, so scrolling by hand to
+            // look ahead, or back to a line already missed, works whether the
+            // script is running or not — and playing carries on from wherever
+            // the hand left it.
             .scrollDisabled(true)
+            .background(ScrollWheelReader { prompter.scroll(by: -$0) })
             .overlay(alignment: .top) { fade(.top) }
             .overlay(alignment: .bottom) { fade(.bottom) }
             .onAppear { prompter.viewportHeight = outer.size.height }

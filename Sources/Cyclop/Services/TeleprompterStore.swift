@@ -117,6 +117,13 @@ final class TeleprompterStore: ObservableObject {
         isRunning = false
     }
 
+    /// Moves the text by hand — the scroll wheel or the trackpad. Leaves the
+    /// clock alone: a running script keeps running from the new place.
+    func scroll(by delta: CGFloat) {
+        guard !script.isEmpty else { return }
+        offset = min(maxOffset, max(0, offset + delta))
+    }
+
     private func tick() {
         guard isRunning else { return }
         offset = min(maxOffset, offset + Self.baseRate * CGFloat(speed) / 60.0)
