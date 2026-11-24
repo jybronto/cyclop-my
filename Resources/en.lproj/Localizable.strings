@@ -156,6 +156,7 @@
 "The keychain did not open — click to ask again; nothing is overwritten" = "The keychain did not open — click to ask again; nothing is overwritten";
 "Press again — a deleted secret cannot be brought back" = "Press again — a deleted secret cannot be brought back";
 "Added: %d" = "Added: %d";
+"Rename (or double-click the row)" = "Rename (or double-click the row)";
 "Copied: %@" = "Copied: %@";
 "Remove from favourites" = "Remove from favourites";
 "Add to favourites — starred ones are listed first" = "Add to favourites — starred ones are listed first";

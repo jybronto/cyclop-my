@@ -13,7 +13,7 @@ struct TOTPPane: View {
     /// Whether the panel holds the keyboard, so the add fields can follow it.
     @Binding var wantsKeyboard: Bool
 
-    private enum Field { case name, secret, search }
+    private enum Field { case name, secret, search, rename }
 
     @FocusState private var focused: Field?
     @State private var isAdding = false
@@ -31,6 +31,9 @@ struct TOTPPane: View {
     /// appearing in the list, a dozen appearing at once does not.
     @State private var importedCount = 0
     @State private var query = ""
+    /// The account whose name is being edited in the top row, if any.
+    @State private var renaming: TOTPAccount?
+    @State private var draftRename = ""
     /// The title of what Return just copied, for a moment — the field empties
     /// at once, and without this nothing on screen would say it worked.
     @State private var copiedTitle: String?
@@ -41,7 +44,13 @@ struct TOTPPane: View {
             // rebuilt once a second rebuilds the text fields with it, and a
             // rebuilt field loses the caret — which in a field being typed into
             // means the first letter is also the last one that lands.
-            if isAdding { editor } else { searchRow }
+            if isAdding {
+                editor
+            } else if renaming != nil {
+                renameRow
+            } else {
+                searchRow
+            }
             if totp.vaultUnreadable { unreadableNotice }
             if let problem { problemNotice(problem) }
             if importedCount > 1 { importedNotice(importedCount) }
@@ -60,9 +69,14 @@ struct TOTPPane: View {
                 focused = nil
                 return
             }
-            focused = isAdding ? (draftSecret.isEmpty ? .secret : .name) : .search
+            if isAdding {
+                focused = draftSecret.isEmpty ? .secret : .name
+            } else {
+                focused = renaming != nil ? .rename : .search
+            }
         }
         .animation(Theme.contentAnimation, value: isAdding)
+        .animation(Theme.contentAnimation, value: renaming?.id)
     }
 
     // MARK: - Search
@@ -156,6 +170,76 @@ struct TOTPPane: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Renaming
+
+    /// In the top row rather than in the list row itself: the list is redrawn
+    /// every second for the codes, and a text field redrawn every second loses
+    /// its caret. Return saves, Esc or the cross leaves the name as it was.
+    private var renameRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pencil")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+            TextField(localized("Name"), text: $draftRename)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white)
+                .tint(Theme.secondary)
+                .focused($focused, equals: .rename)
+                .onSubmit { commitRename() }
+                .onKeyPress(.escape) {
+                    cancelRename()
+                    return .handled
+                }
+            if let subtitle = renaming?.account, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Button { commitRename() } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(draftRename.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? Theme.tertiary : Color.green)
+            }
+            .buttonStyle(.plain)
+            Button { cancelRename() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Theme.surfaceHover)
+        )
+        .onAppear { focused = .rename }
+    }
+
+    private func beginRename(_ account: TOTPAccount) {
+        if isAdding { cancelAdding() }
+        query = ""
+        draftRename = account.title
+        renaming = account
+        wantsKeyboard = true
+    }
+
+    private func commitRename() {
+        if let renaming { totp.rename(renaming, to: draftRename) }
+        cancelRename()
+    }
+
+    private func cancelRename() {
+        renaming = nil
+        draftRename = ""
+        focused = .search
     }
 
     // MARK: - Adding
@@ -314,7 +398,8 @@ struct TOTPPane: View {
                             totp: totp,
                             privacy: privacy,
                             hidden: hides(account),
-                            onCopy: { query = "" }
+                            onCopy: { query = "" },
+                            onRename: { beginRename(account) }
                         )
                     }
                 }
@@ -337,6 +422,7 @@ struct TOTPPane: View {
     /// the field arrives filled and the press that follows is the confirmation,
     /// not the paste. Nothing is added without that press.
     private func beginAdding() {
+        renaming = nil
         query = ""
         draftName = ""
         draftSecret = ""
@@ -399,6 +485,7 @@ private struct TOTPRow: View {
     @ObservedObject var privacy: PrivacyMode
     let hidden: Bool
     var onCopy: () -> Void = {}
+    var onRename: () -> Void = {}
 
     @State private var hovering = false
     @State private var justCopied = false
@@ -450,6 +537,13 @@ private struct TOTPRow: View {
                 if privacy.covers(.totp) {
                     RevealEye(hidden: hidden) { privacy.toggle("totp.\(account.id)") }
                 }
+                Button { onRename() } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(localized("Rename (or double-click the row)"))
                 Button { totp.toggleFavorite(account) } label: {
                     Image(systemName: isFavorite ? "star.slash" : "star")
                         .font(.system(size: 9, weight: .semibold))
@@ -487,6 +581,10 @@ private struct TOTPRow: View {
             hovering = inside
             if !inside { armed = false }
         }
+        // Double first: SwiftUI hands a tap to the last matching gesture, so
+        // the single one has to come after or a double click would only copy.
+        // The first click of a double still copies — harmless.
+        .onTapGesture(count: 2) { onRename() }
         .onTapGesture {
             totp.copy(account)
             flash($justCopied)
