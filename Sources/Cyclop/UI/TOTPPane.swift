@@ -13,7 +13,7 @@ struct TOTPPane: View {
     /// Whether the panel holds the keyboard, so the add fields can follow it.
     @Binding var wantsKeyboard: Bool
 
-    private enum Field { case name, secret }
+    private enum Field { case name, secret, search }
 
     @FocusState private var focused: Field?
     @State private var isAdding = false
@@ -31,6 +31,10 @@ struct TOTPPane: View {
     /// saying. Only ever shown above one: a single addition announces itself by
     /// appearing in the list, a dozen appearing at once does not.
     @State private var importedCount = 0
+    /// The search row stands in for the top row while it is open, the same way
+    /// the editor does: the pane has room for one row above the list.
+    @State private var isSearching = false
+    @State private var query = ""
 
     var body: some View {
         VStack(spacing: 6) {
@@ -40,6 +44,8 @@ struct TOTPPane: View {
             // means the first letter is also the last one that lands.
             if isAdding {
                 editor
+            } else if isSearching {
+                searchRow
             } else {
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     primaryRow(now: timeline.date)
@@ -62,9 +68,14 @@ struct TOTPPane: View {
                 focused = nil
                 return
             }
-            if isAdding { focused = draftSecret.isEmpty ? .secret : .name }
+            if isAdding {
+                focused = draftSecret.isEmpty ? .secret : .name
+            } else if isSearching {
+                focused = .search
+            }
         }
         .animation(Theme.contentAnimation, value: isAdding)
+        .animation(Theme.contentAnimation, value: isSearching)
     }
 
     // MARK: - The one that gets copied
@@ -111,6 +122,17 @@ struct TOTPPane: View {
                 Spacer(minLength: 6)
             }
 
+            if !totp.accounts.isEmpty {
+                Button { beginSearching() } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: .command)
+                .help(localized("Search (⌘F)"))
+            }
+
             Button { beginAdding() } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
@@ -125,6 +147,83 @@ struct TOTPPane: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Theme.surface)
         )
+    }
+
+    // MARK: - Search
+
+    /// Typing narrows the list; Return copies the first match and closes the
+    /// row, Esc closes it. With forty accounts the list stops being something
+    /// to scan, and "git" + Return is faster than any scrolling.
+    private var searchRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+            TextField(localized("Search"), text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(.white)
+                .tint(Theme.secondary)
+                .focused($focused, equals: .search)
+                .onSubmit { copyFirstMatch() }
+                .onKeyPress(.escape) {
+                    endSearching()
+                    return .handled
+                }
+            Button { endSearching() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Theme.surfaceHover)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { focused = .search }
+        // Same reason as the editor: the field has to be on screen before it
+        // can take the caret.
+        .onAppear { focused = .search }
+    }
+
+    /// What the list shows: everything, or what matches every word typed —
+    /// in the issuer or in the account, case and accents aside.
+    private var shown: [TOTPAccount] {
+        let words = query
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard isSearching, !words.isEmpty else { return totp.accounts }
+        return totp.accounts.filter { account in
+            let haystack = account.issuer + " " + account.account
+            return words.allSatisfy {
+                haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            }
+        }
+    }
+
+    private func beginSearching() {
+        if isAdding { cancelAdding() }
+        query = ""
+        isSearching = true
+        wantsKeyboard = true
+    }
+
+    private func endSearching() {
+        isSearching = false
+        query = ""
+        focused = nil
+        wantsKeyboard = false
+    }
+
+    private func copyFirstMatch() {
+        guard let first = shown.first else { return }
+        totp.copy(first)
+        endSearching()
+        flash($justCopied)
     }
 
     // MARK: - Adding
@@ -268,16 +367,22 @@ struct TOTPPane: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if shown.isEmpty {
+            Text("Nothing found")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.tertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 3) {
-                    ForEach(totp.accounts) { account in
+                    ForEach(shown) { account in
                         TOTPRow(
                             account: account,
                             now: now,
                             totp: totp,
                             privacy: privacy,
-                            hidden: hides(account)
+                            hidden: hides(account),
+                            onCopy: { if isSearching { endSearching() } }
                         )
                     }
                 }
@@ -305,6 +410,8 @@ struct TOTPPane: View {
     /// the field arrives filled and the press that follows is the confirmation,
     /// not the paste. Nothing is added without that press.
     private func beginAdding() {
+        isSearching = false
+        query = ""
         draftName = ""
         draftSecret = ""
         problem = nil
@@ -364,6 +471,7 @@ private struct TOTPRow: View {
     @ObservedObject var totp: TOTPStore
     @ObservedObject var privacy: PrivacyMode
     let hidden: Bool
+    var onCopy: () -> Void = {}
 
     @State private var hovering = false
     @State private var justCopied = false
@@ -455,6 +563,7 @@ private struct TOTPRow: View {
         .onTapGesture {
             totp.copy(account)
             flash($justCopied)
+            onCopy()
         }
         .animation(Theme.contentAnimation, value: hovering)
         .animation(Theme.contentAnimation, value: justCopied)
