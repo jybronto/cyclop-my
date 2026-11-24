@@ -44,7 +44,7 @@ final class NotchViewModel: ObservableObject {
         /// Tabs with a field in them. Landing on one hands it the keyboard, so
         /// that arriving and typing is a single move.
         var needsKeyboard: Bool {
-            self == .translate || self == .currency || self == .snippets || self == .notes
+            self == .translate || self == .currency || self == .snippets || self == .notes || self == .totp
         }
 
         /// Tabs whose content needs more than the standard 208 pt.

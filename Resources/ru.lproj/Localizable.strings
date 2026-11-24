@@ -61,7 +61,6 @@
 "Name" = "Название";
 "Text" = "Текст";
 "Delete" = "Удалить";
-"Nothing here yet — add with +" = "Пока пусто — добавь через +";
 "snippets.json is broken — click to open; nothing is overwritten" = "snippets.json не читается — нажми, чтобы открыть; поверх ничего не пишется";
 
 /* Заметки */
@@ -147,11 +146,9 @@
    под QR-квадратом; слово взято такое же, каким его называют сами сайты. */
 "Codes" = "Коды";
 "Authenticator" = "Аутентификатор";
-"Copy the code" = "Скопировать код";
 "Add an authenticator" = "Добавить аутентификатор";
 "Secret or otpauth:// link" = "Секрет или ссылка otpauth://";
 "Take the link or the QR screenshot from the clipboard" = "Взять ссылку или снимок QR из буфера обмена";
-"Copy this one with the button above" = "Копировать кнопкой сверху именно этот";
 "Paste an otpauth:// link, or copy the QR and press +" = "Вставьте ссылку otpauth:// или скопируйте QR и нажмите +";
 "Not a secret or an otpauth:// link" = "Это не секрет и не ссылка otpauth://";
 "Nothing on the clipboard that looks like an authenticator" = "В буфере обмена нет ничего похожего на аутентификатор";
@@ -159,6 +156,8 @@
 "The keychain did not open — click to ask again; nothing is overwritten" = "Связка ключей не открылась — нажмите, чтобы спросить снова; ничего не перезаписано";
 "Press again — a deleted secret cannot be brought back" = "Нажмите ещё раз — удалённый секрет не вернуть";
 "Added: %d" = "Добавлено: %d";
-"Search (⌘F)" = "Поиск (⌘F)";
+"Copied: %@" = "Скопировано: %@";
+"Remove from favourites" = "Убрать из избранного";
+"Add to favourites — starred ones are listed first" = "В избранное — избранные идут первыми";
 "Search" = "Поиск";
 "Nothing found" = "Ничего не найдено";
