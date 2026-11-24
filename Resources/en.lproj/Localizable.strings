@@ -62,7 +62,6 @@
 "Name" = "Name";
 "Text" = "Text";
 "Delete" = "Delete";
-"Nothing here yet — add with +" = "Nothing here yet — add with +";
 "snippets.json is broken — click to open; nothing is overwritten" = "snippets.json is broken — click to open; nothing is overwritten";
 
 /* Notes */
@@ -147,11 +146,9 @@
 /* Вкладка аутентификаторов: коды TOTP. */
 "Codes" = "Codes";
 "Authenticator" = "Authenticator";
-"Copy the code" = "Copy the code";
 "Add an authenticator" = "Add an authenticator";
 "Secret or otpauth:// link" = "Secret or otpauth:// link";
 "Take the link or the QR screenshot from the clipboard" = "Take the link or the QR screenshot from the clipboard";
-"Copy this one with the button above" = "Copy this one with the button above";
 "Paste an otpauth:// link, or copy the QR and press +" = "Paste an otpauth:// link, or copy the QR and press +";
 "Not a secret or an otpauth:// link" = "Not a secret or an otpauth:// link";
 "Nothing on the clipboard that looks like an authenticator" = "Nothing on the clipboard that looks like an authenticator";
@@ -159,6 +156,8 @@
 "The keychain did not open — click to ask again; nothing is overwritten" = "The keychain did not open — click to ask again; nothing is overwritten";
 "Press again — a deleted secret cannot be brought back" = "Press again — a deleted secret cannot be brought back";
 "Added: %d" = "Added: %d";
-"Search (⌘F)" = "Search (⌘F)";
+"Copied: %@" = "Copied: %@";
+"Remove from favourites" = "Remove from favourites";
+"Add to favourites — starred ones are listed first" = "Add to favourites — starred ones are listed first";
 "Search" = "Search";
 "Nothing found" = "Nothing found";

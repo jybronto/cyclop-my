@@ -19,9 +19,9 @@ import Vision
 @MainActor
 final class TOTPStore: ObservableObject {
     @Published private(set) var accounts: [TOTPAccount] = []
-    /// Which one the copy button in the header of the pane reaches for. Nil
-    /// means "the first", so the button works before anything has been chosen.
-    @Published private(set) var primaryID: TOTPAccount.ID?
+    /// The starred ones. Any number of them; they sit at the top of the list,
+    /// in the order they were added, above everything else.
+    @Published private(set) var favoriteIDs: Set<TOTPAccount.ID> = []
     /// Raised when the keychain answered something other than "here it is" or
     /// "there is nothing" — refused, locked, unreadable. The one state in which
     /// writing is forbidden: overwriting an item that could not be read is how
@@ -34,24 +34,29 @@ final class TOTPStore: ObservableObject {
 
     private var loaded = false
 
-    /// Everything, in one JSON blob. The choice of the primary rides along
-    /// rather than sitting in UserDefaults, so that the whole tab is one item
-    /// to back up, move to another Mac, or delete.
+    /// Everything, in one JSON blob. The stars ride along rather than sitting
+    /// in UserDefaults, so that the whole tab is one item to back up, move to
+    /// another Mac, or delete.
+    ///
+    /// `primary` is what earlier versions wrote — one starred account. It is
+    /// still read, and becomes the first favourite, so updating the app does
+    /// not take the star away from the account that had it.
     private struct Vault: Codable {
         var accounts: [TOTPAccount]
         var primary: UUID?
+        var favorites: [UUID]?
     }
 
     private static let service = "com.cyclop.app"
     private static let key = "totp"
 
-    /// The one the copy button copies.
-    var primary: TOTPAccount? {
-        if let primaryID, let found = accounts.first(where: { $0.id == primaryID }) { return found }
-        return accounts.first
-    }
+    func isFavorite(_ account: TOTPAccount) -> Bool { favoriteIDs.contains(account.id) }
 
-    func isPrimary(_ account: TOTPAccount) -> Bool { primary?.id == account.id }
+    /// The list as shown: starred first, then the rest, each part in the order
+    /// the accounts were added.
+    var ordered: [TOTPAccount] {
+        accounts.filter { favoriteIDs.contains($0.id) } + accounts.filter { !favoriteIDs.contains($0.id) }
+    }
 
     // MARK: - Editing
 
@@ -75,7 +80,6 @@ final class TOTPStore: ObservableObject {
             accounts.removeAll { $0.secret == account.secret }
             accounts.append(account)
         }
-        if primaryID == nil { primaryID = accounts.first?.id }
         imported = found.count
         save()
         return nil
@@ -83,12 +87,16 @@ final class TOTPStore: ObservableObject {
 
     func remove(_ account: TOTPAccount) {
         accounts.removeAll { $0.id == account.id }
-        if primaryID == account.id { primaryID = accounts.first?.id }
+        favoriteIDs.remove(account.id)
         save()
     }
 
-    func makePrimary(_ account: TOTPAccount) {
-        primaryID = account.id
+    func toggleFavorite(_ account: TOTPAccount) {
+        if favoriteIDs.contains(account.id) {
+            favoriteIDs.remove(account.id)
+        } else {
+            favoriteIDs.insert(account.id)
+        }
         save()
     }
 
@@ -182,7 +190,9 @@ final class TOTPStore: ObservableObject {
             do {
                 let vault = try JSONDecoder().decode(Vault.self, from: data)
                 accounts = vault.accounts
-                primaryID = vault.primary
+                let ids = Set(vault.accounts.map(\.id))
+                let stored = vault.favorites ?? vault.primary.map { [$0] } ?? []
+                favoriteIDs = Set(stored).intersection(ids)
                 vaultUnreadable = false
             } catch {
                 // The item is there and says something that is not a vault.
@@ -218,7 +228,11 @@ final class TOTPStore: ObservableObject {
             NSLog("Cyclop: refusing to write over a keychain item that could not be read")
             return
         }
-        guard let data = try? JSONEncoder().encode(Vault(accounts: accounts, primary: primaryID)) else { return }
+        guard let data = try? JSONEncoder().encode(Vault(
+            accounts: accounts,
+            primary: nil,
+            favorites: accounts.map(\.id).filter { favoriteIDs.contains($0) }
+        )) else { return }
 
         let query = Self.query()
         var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)

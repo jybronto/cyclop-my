@@ -3,10 +3,10 @@ import SwiftUI
 /// The authenticator tab.
 ///
 /// Shaped around the one move it exists for: the site asked for a code, and it
-/// is wanted in the field within a second or two. So the account used most sits
-/// in a row of its own at the top with a copy button next to it — one hover and
-/// one click, without reading a list — and the rest are below, each a click
-/// away. The list is the fallback; the top row is the tab.
+/// is wanted in the field within a second or two. So the top row is a search
+/// field that already has the caret — type a few letters, press Return, the
+/// code is on the clipboard — and the list below starts with the starred
+/// accounts, each one click away.
 struct TOTPPane: View {
     @ObservedObject var totp: TOTPStore
     @ObservedObject var privacy: PrivacyMode
@@ -26,15 +26,14 @@ struct TOTPPane: View {
     /// Set when the fields were filled from the pasteboard, so the row can say
     /// where the secret came from instead of appearing to invent it.
     @State private var tookFromPasteboard = false
-    @State private var justCopied = false
     /// How many accounts the last import brought in, while that is still worth
     /// saying. Only ever shown above one: a single addition announces itself by
     /// appearing in the list, a dozen appearing at once does not.
     @State private var importedCount = 0
-    /// The search row stands in for the top row while it is open, the same way
-    /// the editor does: the pane has room for one row above the list.
-    @State private var isSearching = false
     @State private var query = ""
+    /// The title of what Return just copied, for a moment — the field empties
+    /// at once, and without this nothing on screen would say it worked.
+    @State private var copiedTitle: String?
 
     var body: some View {
         VStack(spacing: 6) {
@@ -42,18 +41,11 @@ struct TOTPPane: View {
             // rebuilt once a second rebuilds the text fields with it, and a
             // rebuilt field loses the caret — which in a field being typed into
             // means the first letter is also the last one that lands.
-            if isAdding {
-                editor
-            } else if isSearching {
-                searchRow
-            } else {
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    primaryRow(now: timeline.date)
-                }
-            }
+            if isAdding { editor } else { searchRow }
             if totp.vaultUnreadable { unreadableNotice }
             if let problem { problemNotice(problem) }
             if importedCount > 1 { importedNotice(importedCount) }
+            if let copiedTitle { copiedNotice(copiedTitle) }
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 list(now: timeline.date)
             }
@@ -68,71 +60,40 @@ struct TOTPPane: View {
                 focused = nil
                 return
             }
-            if isAdding {
-                focused = draftSecret.isEmpty ? .secret : .name
-            } else if isSearching {
-                focused = .search
-            }
+            focused = isAdding ? (draftSecret.isEmpty ? .secret : .name) : .search
         }
         .animation(Theme.contentAnimation, value: isAdding)
-        .animation(Theme.contentAnimation, value: isSearching)
     }
 
-    // MARK: - The one that gets copied
+    // MARK: - Search
 
-    /// The top row. Everything in it is about one account, and the button on
-    /// the right is the point of the tab.
-    @ViewBuilder
-    private func primaryRow(now: Date) -> some View {
+    /// The whole top row. Typing narrows the list; Return copies the first
+    /// match, Esc empties the field. With two dozen accounts the list stops
+    /// being something to scan, and "git" + Return beats any scrolling.
+    private var searchRow: some View {
         HStack(spacing: 8) {
-            if let account = totp.primary {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.yellow.opacity(0.85))
-                Text(account.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                CodeText(account: account, now: now, hidden: hides(account), size: 14)
-                PeriodRing(account: account, now: now)
-                Spacer(minLength: 6)
-                Button { copy(account) } label: {
-                    // The label changes rather than a message appearing
-                    // elsewhere: the answer to "did that copy" belongs on the
-                    // thing that was pressed.
-                    Image(systemName: justCopied ? "checkmark" : "doc.on.doc.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(justCopied ? Color.green : Color.white)
-                        .frame(width: 26, height: 20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Theme.surfaceHover)
-                        )
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+            TextField(localized("Search"), text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(.white)
+                .tint(Theme.secondary)
+                .focused($focused, equals: .search)
+                .onSubmit { copyFirstMatch() }
+                .onKeyPress(.escape) {
+                    query = ""
+                    return .handled
                 }
-                .buttonStyle(.plain)
-                .help(localized("Copy the code"))
-            } else {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
-                Text("Nothing here yet — add with +")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.tertiary)
-                Spacer(minLength: 6)
-            }
-
-            if !totp.accounts.isEmpty {
-                Button { beginSearching() } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11, weight: .semibold))
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut("f", modifiers: .command)
-                .help(localized("Search (⌘F)"))
             }
-
             Button { beginAdding() } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
@@ -147,57 +108,26 @@ struct TOTPPane: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Theme.surface)
         )
-    }
-
-    // MARK: - Search
-
-    /// Typing narrows the list; Return copies the first match and closes the
-    /// row, Esc closes it. With forty accounts the list stops being something
-    /// to scan, and "git" + Return is faster than any scrolling.
-    private var searchRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Theme.tertiary)
-            TextField(localized("Search"), text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.white)
-                .tint(Theme.secondary)
-                .focused($focused, equals: .search)
-                .onSubmit { copyFirstMatch() }
-                .onKeyPress(.escape) {
-                    endSearching()
-                    return .handled
-                }
-            Button { endSearching() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Theme.surfaceHover)
-        )
         .contentShape(Rectangle())
-        .onTapGesture { focused = .search }
-        // Same reason as the editor: the field has to be on screen before it
-        // can take the caret.
-        .onAppear { focused = .search }
+        .onTapGesture {
+            wantsKeyboard = true
+            focused = .search
+        }
+        // The field has to be on screen before it can take the caret, so the
+        // request is made here — on arrival and on coming back from the editor.
+        .onAppear { if wantsKeyboard { focused = .search } }
     }
 
-    /// What the list shows: everything, or what matches every word typed —
-    /// in the issuer or in the account, case and accents aside.
+    /// What the list shows: starred first, then the rest — all of them, or
+    /// those matching every word typed, in the issuer or the account, case and
+    /// accents aside.
     private var shown: [TOTPAccount] {
         let words = query
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
-        guard isSearching, !words.isEmpty else { return totp.accounts }
-        return totp.accounts.filter { account in
+        let all = totp.ordered
+        guard !words.isEmpty else { return all }
+        return all.filter { account in
             let haystack = account.issuer + " " + account.account
             return words.allSatisfy {
                 haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil
@@ -205,25 +135,27 @@ struct TOTPPane: View {
         }
     }
 
-    private func beginSearching() {
-        if isAdding { cancelAdding() }
-        query = ""
-        isSearching = true
-        wantsKeyboard = true
-    }
-
-    private func endSearching() {
-        isSearching = false
-        query = ""
-        focused = nil
-        wantsKeyboard = false
-    }
-
     private func copyFirstMatch() {
         guard let first = shown.first else { return }
         totp.copy(first)
-        endSearching()
-        flash($justCopied)
+        query = ""
+        copiedTitle = first.title
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if copiedTitle == first.title { copiedTitle = nil }
+        }
+    }
+
+    private func copiedNotice(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.green.opacity(0.85))
+            Text(localized("Copied: %@", title))
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Adding
@@ -382,7 +314,7 @@ struct TOTPPane: View {
                             totp: totp,
                             privacy: privacy,
                             hidden: hides(account),
-                            onCopy: { if isSearching { endSearching() } }
+                            onCopy: { query = "" }
                         )
                     }
                 }
@@ -398,11 +330,6 @@ struct TOTPPane: View {
         privacy.hides(.totp, "totp.\(account.id)")
     }
 
-    private func copy(_ account: TOTPAccount) {
-        totp.copy(account)
-        flash($justCopied)
-    }
-
     /// Opening the editor already looks at the pasteboard.
     ///
     /// By the time somebody presses + they have almost always just copied the
@@ -410,7 +337,6 @@ struct TOTPPane: View {
     /// the field arrives filled and the press that follows is the confirmation,
     /// not the paste. Nothing is added without that press.
     private func beginAdding() {
-        isSearching = false
         query = ""
         draftName = ""
         draftSecret = ""
@@ -440,7 +366,8 @@ struct TOTPPane: View {
         draftName = ""
         draftSecret = ""
         problem = nil
-        wantsKeyboard = false
+        // The keyboard stays: closing the editor puts the search field back,
+        // and the next thing done here is usually typing into it.
     }
 
     private func commit() {
@@ -486,14 +413,14 @@ private struct TOTPRow: View {
     /// that.
     @State private var armed = false
 
-    private var isPrimary: Bool { totp.isPrimary(account) }
+    private var isFavorite: Bool { totp.isFavorite(account) }
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: justCopied ? "checkmark" : (isPrimary ? "star.fill" : "key.fill"))
+            Image(systemName: justCopied ? "checkmark" : (isFavorite ? "star.fill" : "key.fill"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(
-                    justCopied ? Color.green : (isPrimary ? Color.yellow.opacity(0.85) : Theme.tertiary)
+                    justCopied ? Color.green : (isFavorite ? Color.yellow.opacity(0.85) : Theme.tertiary)
                 )
                 .frame(width: 14)
 
@@ -523,15 +450,15 @@ private struct TOTPRow: View {
                 if privacy.covers(.totp) {
                     RevealEye(hidden: hidden) { privacy.toggle("totp.\(account.id)") }
                 }
-                if !isPrimary {
-                    Button { totp.makePrimary(account) } label: {
-                        Image(systemName: "star")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(localized("Copy this one with the button above"))
+                Button { totp.toggleFavorite(account) } label: {
+                    Image(systemName: isFavorite ? "star.slash" : "star")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
                 }
+                .buttonStyle(.plain)
+                .help(isFavorite
+                    ? localized("Remove from favourites")
+                    : localized("Add to favourites — starred ones are listed first"))
                 Button {
                     if armed {
                         totp.remove(account)
