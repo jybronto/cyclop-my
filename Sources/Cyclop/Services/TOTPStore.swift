@@ -91,6 +91,20 @@ final class TOTPStore: ObservableObject {
         save()
     }
 
+    /// Gives the row its own name. Only the issuer changes — that is the
+    /// title of the row; the account (usually an email) stays as the grey
+    /// subtitle. Google Authenticator offers no way to rename what a site
+    /// called itself, and "production.netsuite.com" is not what anyone types
+    /// into a search field.
+    func rename(_ account: TOTPAccount, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = accounts.firstIndex(where: { $0.id == account.id }),
+              accounts[index].issuer != trimmed else { return }
+        accounts[index].issuer = trimmed
+        save()
+    }
+
     func toggleFavorite(_ account: TOTPAccount) {
         if favoriteIDs.contains(account.id) {
             favoriteIDs.remove(account.id)

@@ -156,6 +156,7 @@
 "The keychain did not open — click to ask again; nothing is overwritten" = "Связка ключей не открылась — нажмите, чтобы спросить снова; ничего не перезаписано";
 "Press again — a deleted secret cannot be brought back" = "Нажмите ещё раз — удалённый секрет не вернуть";
 "Added: %d" = "Добавлено: %d";
+"Rename (or double-click the row)" = "Переименовать (или двойной клик по строке)";
 "Copied: %@" = "Скопировано: %@";
 "Remove from favourites" = "Убрать из избранного";
 "Add to favourites — starred ones are listed first" = "В избранное — избранные идут первыми";
