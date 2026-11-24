@@ -109,12 +109,19 @@ final class TeleprompterStore: ObservableObject {
 
     /// Stops the clock and leaves the position alone. For the panel closing or
     /// the tab changing, where the only thing that has to happen immediately is
-    /// that the text stops moving — where it stopped is decided on the way back
-    /// in, by the pane, which puts it at the top.
+    /// that the text stops moving. The pane picks up from the same place on the
+    /// way back in, unless the script had been read to the end.
     func suspend() {
         timer?.invalidate()
         timer = nil
         isRunning = false
+    }
+
+    /// Moves the text by hand — the scroll wheel or the trackpad. Leaves the
+    /// clock alone: a running script keeps running from the new place.
+    func scroll(by delta: CGFloat) {
+        guard !script.isEmpty else { return }
+        offset = min(maxOffset, max(0, offset + delta))
     }
 
     private func tick() {

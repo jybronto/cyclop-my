@@ -135,7 +135,13 @@ final class PointerWatcher {
             onInteractiveChange?(interactive)
         }
 
-        let inside = (isInside ? closeRect : openRect).contains(point)
+        // An open panel is measured by its whole body, whatever this watcher
+        // last recorded. The two disagree when something held the panel open
+        // after the pointer left — a playing teleprompter — and the pointer
+        // then came back onto the body: measured by the small notch rect it
+        // never counted as back, and pausing the script folded the panel out
+        // from under the pointer that had just clicked pause.
+        let inside = (isInside || isPanelOpen() ? closeRect : openRect).contains(point)
 
         // Whether the panel is open and where the pointer is are two separate
         // facts, and only one of them is tracked here. They are supposed to

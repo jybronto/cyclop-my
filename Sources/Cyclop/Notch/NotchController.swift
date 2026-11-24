@@ -52,8 +52,14 @@ final class NotchController {
 
         vm.teleprompter.$isRunning
             .removeDuplicates()
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.updatePin() }
+            // The value comes from the publisher, not from the store: `@Published`
+            // fires in `willSet`, so reading `isRunning` back in here still gets
+            // the old one. Reading it back is what used to happen, and pressing
+            // play then saw a script that was not running, pinned nothing, and
+            // the panel folded the moment the pointer left — taking the take
+            // with it.
+            .sink { [weak self] running in
+                MainActor.assumeIsolated { self?.updatePin(running: running) }
             }
             .store(in: &cancellables)
     }
@@ -133,8 +139,8 @@ final class NotchController {
     /// until it stops. If it goes away first — unplugged, or rearranged into a
     /// rebuild — the take ends, for the same reason the display going to sleep
     /// ends it: there is nobody left reading.
-    private func updatePin() {
-        guard let vm, vm.teleprompter.isRunning else {
+    private func updatePin(running: Bool? = nil) {
+        guard let vm, running ?? vm.teleprompter.isRunning else {
             panels.values.forEach { $0.isPinned = false }
             return
         }
