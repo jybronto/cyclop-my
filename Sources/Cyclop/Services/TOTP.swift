@@ -129,6 +129,17 @@ enum TOTP {
     static func accounts(from text: String, name: String = "") -> [TOTPAccount] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+        // Several links, one per line: what the pasteboard reader hands over
+        // when one screenshot caught more than one QR — two transfer codes of a
+        // Google export side by side, say. Split on newlines only: a label
+        // written into a QR without percent-encoding can carry a space.
+        let lines = trimmed
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.lowercased().hasPrefix("otpauth") }
+        if lines.count > 1 {
+            return lines.flatMap { accounts(from: $0, name: name) }
+        }
         let lowered = trimmed.lowercased()
         // Checked before the plain `otpauth://` case and not with `hasPrefix`
         // on a shared stem: the two schemes only look alike. One is text
@@ -258,10 +269,67 @@ enum TOTP {
 /// ```
 ///
 /// The period is absent because Google only ever writes 30.
+/// Which part of a multi-QR export one code is.
+///
+/// Google Authenticator puts at most ten accounts into one transfer QR. With
+/// more on the phone the export becomes a slideshow — "1 of 3", "2 of 3" — and
+/// every slide is a complete, valid payload on its own. Taking only the first
+/// one is the easiest mistake in the whole move, and it fails silently: ten
+/// accounts arrive, the rest stay on the phone, and nothing says so. These
+/// numbers are what lets the tab say so.
+struct MigrationBatch: Equatable, Sendable {
+    /// Zero-based, as Google writes it.
+    let index: Int
+    /// How many QRs the export has; 1 for a single-code export.
+    let size: Int
+    /// The same for every QR of one export, different for the next export.
+    let id: Int
+}
+
 extension TOTP {
     static func fromMigration(_ text: String) -> [TOTPAccount] {
         guard let payload = migrationPayload(text) else { return [] }
         return parseMigration([UInt8](payload))
+    }
+
+    /// The batch fields of every transfer QR in the text — one per line, as
+    /// `accounts(from:)` reads them. Empty for anything that is not an export.
+    static func migrationBatches(in text: String) -> [MigrationBatch] {
+        text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.lowercased().hasPrefix("otpauth-migration://") }
+            .compactMap { line in
+                guard let payload = migrationPayload(line) else { return nil }
+                return parseBatch([UInt8](payload))
+            }
+    }
+
+    /// `version = 2; batch_size = 3; batch_index = 4; batch_id = 5` — all
+    /// varints, all at the top level next to the accounts.
+    private static func parseBatch(_ bytes: [UInt8]) -> MigrationBatch? {
+        var reader = ProtobufReader(bytes: bytes)
+        var size = 1
+        var index = 0
+        var id = 0
+        while let field = reader.field() {
+            switch (field.number, field.wire) {
+            case (3, 0):
+                guard let value = reader.varint() else { return nil }
+                size = Int(clamping: value)
+            case (4, 0):
+                guard let value = reader.varint() else { return nil }
+                index = Int(clamping: value)
+            case (5, 0):
+                guard let value = reader.varint() else { return nil }
+                id = Int(truncatingIfNeeded: value)
+            default:
+                guard reader.skip(wire: field.wire) else { return nil }
+            }
+        }
+        // A size of zero or an index past the end is not a batch anyone wrote;
+        // treat the code as standing alone rather than invent a progress bar.
+        guard size >= 1, index >= 0, index < size else { return nil }
+        return MigrationBatch(index: index, size: size, id: id)
     }
 
     /// Pulls `data=` out and un-base64s it.
@@ -291,9 +359,9 @@ extension TOTP {
         var found: [TOTPAccount] = []
         while let field = reader.field() {
             // Field 1 is one account; everything else is batch bookkeeping —
-            // version, batch size, batch index — which matters only to an app
-            // reassembling a multi-QR export, and this one takes the QRs one at
-            // a time.
+            // version, batch size, batch index — read separately by
+            // `migrationBatches(in:)`, so the tab can say which QRs of a
+            // multi-QR export are still missing.
             if field.number == 1, field.wire == 2 {
                 guard let block = reader.lengthDelimited() else { break }
                 if let account = parseParameters(block) { found.append(account) }
