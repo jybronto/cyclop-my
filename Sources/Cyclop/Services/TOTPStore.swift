@@ -28,25 +28,9 @@ final class TOTPStore: ObservableObject {
     /// a list of authenticators becomes an empty list of authenticators.
     @Published private(set) var vaultUnreadable = false
     /// How many accounts the last addition brought in. One, normally — but a
-    /// Google Authenticator export arrives as ten at once, and a tab that
+    /// Google Authenticator export arrives as a dozen at once, and a tab that
     /// silently grew by eleven rows owes the user a number.
     @Published private(set) var imported = 0
-    /// Where a multi-QR Google export stands: which of its codes have been
-    /// taken in. Nil when the last addition was not part of one, or after the
-    /// user waved the notice away. In memory only — it is about the next
-    /// minute, not about the vault.
-    @Published private(set) var transfer: Transfer?
-
-    struct Transfer: Equatable {
-        let id: Int
-        let size: Int
-        /// Zero-based, as in the payload.
-        var seen: Set<Int>
-
-        var isComplete: Bool { seen.count >= size }
-        /// One-based, for people: "1, 2".
-        var seenList: String { seen.sorted().map { String($0 + 1) }.joined(separator: ", ") }
-    }
 
     private var loaded = false
 
@@ -93,23 +77,9 @@ final class TOTPStore: ObservableObject {
         }
         if primaryID == nil { primaryID = accounts.first?.id }
         imported = found.count
-        noteBatches(in: text)
         save()
         return nil
     }
-
-    /// Keeps count of a multi-QR export. A code from a different export starts
-    /// the count over; a single-QR export needs no count at all.
-    private func noteBatches(in text: String) {
-        for batch in TOTP.migrationBatches(in: text) where batch.size > 1 {
-            if transfer?.id != batch.id || transfer?.size != batch.size {
-                transfer = Transfer(id: batch.id, size: batch.size, seen: [])
-            }
-            transfer?.seen.insert(batch.index)
-        }
-    }
-
-    func dismissTransfer() { transfer = nil }
 
     func remove(_ account: TOTPAccount) {
         accounts.removeAll { $0.id == account.id }
@@ -176,22 +146,17 @@ final class TOTPStore: ObservableObject {
             NSLog("Cyclop: cannot read the picture on the pasteboard: \(error.localizedDescription)")
             return nil
         }
-        // A screenshot may hold more than one square — two transfer codes of a
-        // Google export put side by side, a page offering codes for two
-        // services, or the app's own window caught in frame. Every square that
-        // is an authenticator is taken, one per line; the rest are not ours.
-        // Taking only the first was how a multi-QR export lost accounts.
-        var payloads: [String] = []
+        // A screenshot may hold more than one square — a page offering the code
+        // for two different services, or the app's own window caught in frame.
+        // The first one that is an authenticator wins; the rest are not ours.
         for observation in request.results ?? [] {
-            guard let payload = observation.payloadStringValue?
-                .trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
+            guard let payload = observation.payloadStringValue else { continue }
             let lowered = payload.lowercased()
             // Both schemes: one QR from a site, or the one Google Authenticator
-            // shows when handing over what it holds.
-            guard lowered.hasPrefix("otpauth://") || lowered.hasPrefix("otpauth-migration://") else { continue }
-            if !payloads.contains(payload) { payloads.append(payload) }
+            // shows when handing over everything it holds.
+            if lowered.hasPrefix("otpauth://") || lowered.hasPrefix("otpauth-migration://") { return payload }
         }
-        return payloads.isEmpty ? nil : payloads.joined(separator: "\n")
+        return nil
     }
 
     // MARK: - The keychain

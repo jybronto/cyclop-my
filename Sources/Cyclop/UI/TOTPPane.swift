@@ -53,8 +53,7 @@ struct TOTPPane: View {
             }
             if totp.vaultUnreadable { unreadableNotice }
             if let problem { problemNotice(problem) }
-            if importedCount > 1, totp.transfer == nil { importedNotice(importedCount) }
-            if let transfer = totp.transfer { transferNotice(transfer) }
+            if importedCount > 1 { importedNotice(importedCount) }
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 list(now: timeline.date)
             }
@@ -338,28 +337,6 @@ struct TOTPPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Said after every QR of a multi-QR export until all of them are in —
-    /// Google Authenticator gives ten accounts per QR, and the rest sit on the
-    /// next slide of the export, which is easy never to see. Click to hide.
-    private func transferNotice(_ transfer: TOTPStore.Transfer) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: transfer.isComplete ? "checkmark.circle.fill" : "qrcode")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(transfer.isComplete ? Color.green.opacity(0.85) : Color.yellow.opacity(0.85))
-            Text(transfer.isComplete
-                ? localized("All %d transfer QR codes added", transfer.size)
-                : localized("QR %@ of %d added — copy the next one and press +", transfer.seenList, transfer.size))
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { totp.dismissTransfer() }
-        .help(localized("Click to hide"))
-    }
-
     private func problemNotice(_ text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
@@ -482,14 +459,6 @@ struct TOTPPane: View {
         if count > 1 {
             importedCount = count
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { importedCount = 0 }
-        }
-        // An unfinished export stays on screen until the last QR is in — that
-        // notice is the only thing pointing at the accounts still on the phone.
-        // A finished one says so and goes.
-        if let transfer = totp.transfer, transfer.isComplete {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                if totp.transfer == transfer { totp.dismissTransfer() }
-            }
         }
     }
 }

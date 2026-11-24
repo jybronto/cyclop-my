@@ -162,6 +162,3 @@
 "Search (⌘F)" = "Поиск (⌘F)";
 "Search" = "Поиск";
 "Nothing found" = "Ничего не найдено";
-"Click to hide" = "Нажмите, чтобы скрыть";
-"All %d transfer QR codes added" = "Все QR переноса добавлены: %d";
-"QR %@ of %d added — copy the next one and press +" = "Добавлен QR %@ из %d — скопируйте следующий и нажмите +";
